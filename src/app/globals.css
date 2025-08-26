@@ -1,0 +1,74 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* React PDF Styles */
+.react-pdf__Document {
+  @apply bg-transparent;
+}
+
+.react-pdf__Page {
+  @apply shadow-lg mb-4;
+}
+
+.react-pdf__Page__canvas {
+  @apply max-w-full h-auto;
+}
+
+.react-pdf__Page__textContent {
+  @apply absolute top-0 left-0 right-0 bottom-0;
+}
+
+.react-pdf__Page__textContent span {
+  @apply text-transparent;
+  user-select: text;
+  cursor: text;
+}
+
+/* Allow text selection and highlighting */
+.react-pdf__Page__textContent span::-moz-selection,
+.react-pdf__Page__textContent span::selection {
+  @apply bg-yellow-300;
+}
+
+/* Evidence highlighting */
+.react-pdf__Page__textContent span.evidence-highlight {
+  @apply bg-yellow-200 text-yellow-900;
+  color: #854d0e !important;
+  background-color: #fef3c7 !important;
+  opacity: 1 !important;
+  animation: highlight-pulse 2s ease-in-out;
+}
+
+@keyframes highlight-pulse {
+  0%, 100% { 
+    background-color: #fef3c7; 
+  }
+  50% { 
+    background-color: #fbbf24; 
+  }
+}
