@@ -22,6 +22,9 @@ interface EvidenceMapping {
   controlId: number;
   controlTitle: string;
   controlDescription: string;
+  controlCategory?: string;
+  controlSubcategory?: string;
+  controlIdString?: string;
   status: 'compliant' | 'partial' | 'missing';
   confidenceScore: number;
   reasoning: string;
@@ -58,6 +61,15 @@ interface GapSummary {
   recommendations: string[];
 }
 
+interface Document {
+  id: number;
+  originalName: string;
+  fileType: string;
+  fileSize: number;
+  processedAt: string;
+  createdAt: string;
+}
+
 interface AnalysisResults {
   analysis: Analysis;
   evidenceMappings: EvidenceMapping[];
@@ -68,8 +80,9 @@ export default function AnalysisResultsPage() {
   const params = useParams();
   const analysisId = params.id;
   const [results, setResults] = useState<AnalysisResults | null>(null);
+  const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'evidence' | 'gaps'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'evidence' | 'documents'>('overview');
   const [selectedMapping, setSelectedMapping] = useState<EvidenceMapping | null>(null);
   
   // Document viewer state
@@ -125,14 +138,21 @@ export default function AnalysisResultsPage() {
 
   const fetchResults = async () => {
     try {
-      const response = await fetch(`/api/admin/analyses/${analysisId}`);
-      const data = await response.json();
+      const [analysisResponse, documentsResponse] = await Promise.all([
+        fetch(`/api/admin/analyses/${analysisId}`),
+        fetch('/api/admin/processed-documents')
+      ]);
       
-      if (data.success) {
-        setResults(data.results);
+      const [analysisData, documentsData] = await Promise.all([
+        analysisResponse.json(),
+        documentsResponse.json()
+      ]);
+      
+      if (analysisData.success) {
+        setResults(analysisData.results);
         
         // Calculate line numbers for all evidence items
-        const evidenceMappings = data.results.evidenceMappings || [];
+        const evidenceMappings = analysisData.results.evidenceMappings || [];
         const lineNumbers: {[key: string]: number} = {};
         
         for (const mapping of evidenceMappings) {
@@ -155,7 +175,11 @@ export default function AnalysisResultsPage() {
           }
         }
       } else {
-        console.error('Failed to fetch results:', data.error);
+        console.error('Failed to fetch results:', analysisData.error);
+      }
+      
+      if (documentsData.success) {
+        setDocuments(documentsData.documents || []);
       }
     } catch (error) {
       console.error('Failed to fetch results:', error);
@@ -233,7 +257,7 @@ export default function AnalysisResultsPage() {
           {[
             { id: 'overview', label: 'Overview', count: null },
             { id: 'evidence', label: 'Evidence Mappings', count: evidenceMappings.length },
-            { id: 'gaps', label: 'Gap Analysis', count: gapSummary.missingControls.length + gapSummary.lowConfidenceControls.length }
+            { id: 'documents', label: 'Documents', count: documents.length }
           ].map(tab => (
             <button
               key={tab.id}
@@ -338,53 +362,136 @@ export default function AnalysisResultsPage() {
 
       {/* Evidence Tab */}
       {activeTab === 'evidence' && (
-        <div className="space-y-4">
+        <div className="space-y-6">
           {evidenceMappings.map((mapping) => (
-            <div key={mapping.id} className="bg-white rounded-lg shadow p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-2 mb-2">
-                    <h3 className="text-lg font-semibold text-gray-900">{mapping.controlTitle}</h3>
-                    <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(mapping.status)}`}>
-                      {mapping.status}
-                    </span>
-                    <span className={`text-sm font-medium ${getConfidenceColor(mapping.confidenceScore)}`}>
-                      {Math.round(mapping.confidenceScore)}% confidence
-                    </span>
+            <div key={mapping.id} className="bg-white rounded-lg shadow">
+              {/* Control Header */}
+              <div className="p-6 border-b border-gray-200">
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-3 mb-3">
+                      {mapping.controlIdString && (
+                        <span className="px-3 py-1 bg-blue-50 text-blue-700 text-sm font-mono rounded-md border">
+                          {mapping.controlIdString}
+                        </span>
+                      )}
+                      <span className={`px-3 py-1 text-sm font-semibold rounded-full ${getStatusColor(mapping.status)}`}>
+                        {mapping.status}
+                      </span>
+                      <span className={`text-sm font-medium ${getConfidenceColor(mapping.confidenceScore)}`}>
+                        {Math.round(mapping.confidenceScore)}% confidence
+                      </span>
+                    </div>
+                    <h3 className="text-xl font-semibold text-gray-900 mb-2">{mapping.controlTitle}</h3>
+                    
+                    {/* Control Metadata */}
+                    <div className="flex items-center space-x-6 text-sm text-gray-600 mb-3">
+                      {mapping.controlCategory && (
+                        <div className="flex items-center">
+                          <span className="font-medium">Category:</span>
+                          <span className="ml-1 text-gray-800">{mapping.controlCategory}</span>
+                        </div>
+                      )}
+                      {mapping.controlSubcategory && (
+                        <div className="flex items-center">
+                          <span className="font-medium">Subcategory:</span>
+                          <span className="ml-1 text-gray-800">{mapping.controlSubcategory}</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <p className="text-gray-700 text-sm leading-relaxed">{mapping.controlDescription}</p>
                   </div>
-                  <p className="text-gray-600 text-sm mb-3">{mapping.controlDescription}</p>
-                  <p className="text-sm text-gray-700">{mapping.reasoning}</p>
+                </div>
+
+                {/* Analysis Summary */}
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h4 className="font-semibold text-gray-900 mb-4">Analysis Summary</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <div>
+                        <div className="font-medium text-gray-700 mb-1">Specificity:</div>
+                        <div className="text-gray-800 text-sm leading-relaxed">
+                          {mapping.evidenceItems.length > 0 
+                            ? `High - ${mapping.evidenceItems.length} specific evidence item${mapping.evidenceItems.length === 1 ? '' : 's'} directly address${mapping.evidenceItems.length === 1 ? 'es' : ''} this control`
+                            : 'Low - No specific evidence found that directly addresses this control'
+                          }
+                        </div>
+                      </div>
+                      <div>
+                        <div className="font-medium text-gray-700 mb-1">Completeness:</div>
+                        <div className="text-gray-800 text-sm leading-relaxed">
+                          {mapping.status === 'compliant' 
+                            ? 'Complete - Evidence covers all aspects of the requirement'
+                            : mapping.status === 'partial'
+                            ? 'Partial - Evidence covers some but not all aspects of the requirement'  
+                            : 'Incomplete - No evidence found to demonstrate compliance'
+                          }
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="font-medium text-gray-700 mb-1">Assessment:</div>
+                      <div className="text-gray-800 text-sm leading-relaxed">{mapping.reasoning}</div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Evidence Items */}
+              {/* Supporting Evidence */}
               {mapping.evidenceItems && mapping.evidenceItems.length > 0 && (
-                <div className="mt-4 border-t pt-4">
-                  <h4 className="text-sm font-medium text-gray-900 mb-2">Supporting Evidence ({mapping.evidenceItems.length})</h4>
-                  <div className="space-y-2">
+                <div className="p-6">
+                  <h4 className="text-lg font-semibold text-gray-900 mb-4">Supporting Evidence ({mapping.evidenceItems.length})</h4>
+                  <div className="space-y-3">
                     {mapping.evidenceItems.map((evidence, idx) => (
                       <div 
                         key={evidence.id || idx} 
                         onClick={() => handleEvidenceClick(evidence)}
-                        className="bg-gray-50 p-3 rounded border-l-4 border-blue-200 hover:bg-blue-50 hover:border-blue-300 cursor-pointer transition-colors group"
+                        className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-100 hover:from-blue-100 hover:to-indigo-100 hover:border-blue-200 cursor-pointer transition-all group"
                         title="Click to view source document"
                       >
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="text-xs text-gray-500 group-hover:text-blue-600">
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex items-center text-sm text-gray-600 group-hover:text-blue-700">
+                            <svg className="w-4 h-4 mr-2 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                            </svg>
                             <span className="font-medium">{evidence.documentName || `Document ${evidence.documentId}`}</span>
-                            <span> • Line {evidenceLineNumbers[`${evidence.documentId}-${evidence.id}`] || '...'}</span>
-                            <span className="ml-2 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <span className="mx-2">•</span>
+                            <span>Line {evidenceLineNumbers[`${evidence.documentId}-${evidence.id}`] || '...'}</span>
+                            <span className="ml-3 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
                               📄 View Document
                             </span>
                           </div>
-                          <div className="text-xs text-gray-500">
-                            Confidence: {Math.round(evidence.confidence)}% | Relevance: {Math.round(evidence.relevanceScore)}%
+                          <div className="flex items-center space-x-4 text-xs">
+                            <div className="flex items-center">
+                              <span className="text-gray-500 mr-1">Confidence:</span>
+                              <span className={`font-medium ${getConfidenceColor(evidence.confidence)}`}>
+                                {Math.round(evidence.confidence)}%
+                              </span>
+                            </div>
+                            <div className="flex items-center">
+                              <span className="text-gray-500 mr-1">Relevance:</span>
+                              <span className={`font-medium ${getConfidenceColor(evidence.relevanceScore)}`}>
+                                {Math.round(evidence.relevanceScore)}%
+                              </span>
+                            </div>
                           </div>
                         </div>
-                        <p className="text-sm text-gray-700 group-hover:text-gray-900">{evidence.evidenceText}</p>
+                        <blockquote className="text-sm text-gray-800 italic border-l-3 border-blue-300 pl-3 group-hover:text-gray-900">
+                          "{evidence.evidenceText}"
+                        </blockquote>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* No Evidence Found */}
+              {(!mapping.evidenceItems || mapping.evidenceItems.length === 0) && (
+                <div className="p-6 text-center">
+                  <div className="text-gray-400 text-4xl mb-2">📋</div>
+                  <h4 className="text-gray-600 font-medium mb-1">No Supporting Evidence Found</h4>
+                  <p className="text-gray-500 text-sm">No documents contain evidence that directly addresses this control requirement.</p>
                 </div>
               )}
             </div>
@@ -392,77 +499,66 @@ export default function AnalysisResultsPage() {
         </div>
       )}
 
-      {/* Gap Analysis Tab */}
-      {activeTab === 'gaps' && (
-        <div className="space-y-6">
-          {/* Recommendations */}
-          {gapSummary.recommendations.length > 0 && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-              <h3 className="text-lg font-semibold text-blue-900 mb-3">Recommendations</h3>
-              <ul className="space-y-2">
-                {gapSummary.recommendations.map((rec, idx) => (
-                  <li key={idx} className="text-blue-800 text-sm">• {rec}</li>
-                ))}
-              </ul>
+      {/* Documents Tab */}
+      {activeTab === 'documents' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-lg shadow">
+            <div className="p-6 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Analysis Documents</h3>
+              <p className="text-sm text-gray-600 mt-1">Documents that were processed and used for this compliance analysis</p>
             </div>
-          )}
-
-          {/* Missing Controls */}
-          {gapSummary.missingControls.length > 0 && (
-            <div className="bg-white rounded-lg shadow">
-              <div className="p-6 border-b">
-                <h3 className="text-lg font-semibold text-gray-900">Missing Controls ({gapSummary.missingControls.length})</h3>
-                <p className="text-sm text-gray-600">Controls with no supporting evidence found in documents</p>
-              </div>
-              <div className="divide-y">
-                {gapSummary.missingControls.map((control) => (
-                  <div key={control.id} className="p-6">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="font-medium text-gray-900">{control.title}</h4>
-                        <p className="text-sm text-gray-600 mt-1">{control.description}</p>
+            <div className="divide-y divide-gray-200">
+              {documents.map((document) => (
+                <div key={document.id} className="p-6 hover:bg-gray-50 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-3 mb-2">
+                        <svg className="w-8 h-8 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                        </svg>
+                        <div>
+                          <h4 className="text-lg font-medium text-gray-900">{document.originalName}</h4>
+                          <div className="flex items-center space-x-4 text-sm text-gray-500 mt-1">
+                            <span>Type: {document.fileType.toUpperCase()}</span>
+                            <span>Size: {(document.fileSize / 1024 / 1024).toFixed(1)} MB</span>
+                            <span>Processed: {new Date(document.processedAt).toLocaleDateString()}</span>
+                          </div>
+                        </div>
                       </div>
-                      <span className="px-2 py-1 text-xs font-semibold rounded-full bg-red-100 text-red-700">
-                        {control.importance} priority
-                      </span>
                     </div>
+                    <button
+                      onClick={() => {
+                        setSelectedDocument({
+                          documentId: document.id,
+                          documentName: document.originalName,
+                          evidenceText: '',
+                          pageNumber: undefined
+                        });
+                        setViewerOpen(true);
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      <span>View Document</span>
+                    </button>
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
+              
+              {documents.length === 0 && (
+                <div className="p-12 text-center">
+                  <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Documents Found</h3>
+                  <p className="text-gray-600">No processed documents are available for this analysis.</p>
+                </div>
+              )}
             </div>
-          )}
-
-          {/* Low Confidence Controls */}
-          {gapSummary.lowConfidenceControls.length > 0 && (
-            <div className="bg-white rounded-lg shadow">
-              <div className="p-6 border-b">
-                <h3 className="text-lg font-semibold text-gray-900">Low Confidence Controls ({gapSummary.lowConfidenceControls.length})</h3>
-                <p className="text-sm text-gray-600">Controls that need additional or clearer evidence</p>
-              </div>
-              <div className="divide-y">
-                {gapSummary.lowConfidenceControls.map((control) => (
-                  <div key={control.id} className="p-6">
-                    <div className="flex items-start justify-between mb-2">
-                      <h4 className="font-medium text-gray-900">{control.title}</h4>
-                      <span className={`text-sm font-medium ${getConfidenceColor(control.confidence)}`}>
-                        {Math.round(control.confidence)}% confidence
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-600">{control.reasoning}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* No Gaps Found */}
-          {gapSummary.missingControls.length === 0 && gapSummary.lowConfidenceControls.length === 0 && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
-              <div className="text-green-600 text-4xl mb-2">✓</div>
-              <h3 className="text-lg font-semibold text-green-900">No Significant Gaps Found</h3>
-              <p className="text-green-800 text-sm">All controls have sufficient evidence with good confidence scores.</p>
-            </div>
-          )}
+          </div>
         </div>
       )}
 

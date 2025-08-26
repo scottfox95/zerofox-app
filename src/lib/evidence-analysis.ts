@@ -129,10 +129,11 @@ export class EvidenceAnalyzer {
       const framework = frameworkResult[0];
       consoleLogger.analysisStep('Framework loaded', `${framework.name} with ${framework.controls_count || 0} controls`);
 
-      // Get controls for this framework
+      // Get controls for this framework (LIMITED TO 3 FOR TESTING)
       const controlsResult = await sql`
         SELECT * FROM controls WHERE framework_id = ${frameworkId}
         ORDER BY control_id
+        LIMIT 3
       `;
 
       // Create analysis record
@@ -362,13 +363,13 @@ export class EvidenceAnalyzer {
           )
           VALUES (
             ${mapping.id},
-            ${evidence.documentId},
+            ${evidence.documentId || 0},
             ${evidence.chunkId || 0},
             ${evidence.evidenceText},
-            ${evidence.pageNumber},
-            ${evidence.chunkIndex},
-            ${evidence.confidence},
-            ${evidence.relevanceScore}
+            ${evidence.pageNumber || null},
+            ${evidence.chunkIndex || 0},
+            ${evidence.confidence || 0},
+            ${evidence.relevanceScore || 0}
           )
         `;
       }
@@ -460,13 +461,13 @@ export class EvidenceAnalyzer {
           )
           VALUES (
             ${mapping.id},
-            ${evidence.documentId},
-            ${evidence.chunkId || 0}, // May not have chunk_id with master doc approach
+            ${evidence.documentId || 0},
+            ${evidence.chunkId || 0},
             ${evidence.evidenceText},
-            ${evidence.pageNumber},
-            ${evidence.chunkIndex},
-            ${evidence.confidence},
-            ${evidence.relevanceScore}
+            ${evidence.pageNumber || null},
+            ${evidence.chunkIndex || 0},
+            ${evidence.confidence || 0},
+            ${evidence.relevanceScore || 0}
           )
         `;
       }
@@ -557,13 +558,13 @@ export class EvidenceAnalyzer {
           )
           VALUES (
             ${mapping.id},
-            ${evidence.documentId},
-            ${evidence.chunkId},
+            ${evidence.documentId || 0},
+            ${evidence.chunkId || 0},
             ${evidence.evidenceText},
-            ${evidence.pageNumber},
-            ${evidence.chunkIndex},
-            ${evidence.confidence},
-            ${evidence.relevanceScore}
+            ${evidence.pageNumber || null},
+            ${evidence.chunkIndex || 0},
+            ${evidence.confidence || 0},
+            ${evidence.relevanceScore || 0}
           )
         `;
       }
@@ -625,7 +626,7 @@ export class EvidenceAnalyzer {
         'control.title': control.title,
         'control.description': control.description || control.requirement_text || '',
         'organizedDocument.categories': organizedDocument.categories?.join(', ') || 'No categories',
-        'organizedDocument.documentCount': organizedDocument.documentCount.toString(),
+        'organizedDocument.documentCount': (organizedDocument.documentCount || 0).toString(),
         'semanticChunks.length': semanticChunks.length.toString(),
         'originalChunks.length': originalChunks.length.toString(),
         'semanticOverview': this.buildSemanticOverview(semanticChunks),
@@ -730,7 +731,7 @@ Guidelines:
         'control.title': control.title,
         'control.description': control.description,
         'numberedDocument': numberedDocument,
-        'organizedDocument.documentCount': organizedDocument.documentCount.toString(),
+        'organizedDocument.documentCount': (organizedDocument.documentCount || 0).toString(),
         'organizedDocument.categories.length': (organizedDocument.categories?.length || 0).toString()
       });
     }
@@ -1095,10 +1096,13 @@ Guidelines:
         createdAt: rawAnalysis.created_at
       } as Analysis;
 
-      // Get evidence mappings with items
+      // Get evidence mappings with items and control details
       const mappingsResult = await sql`
         SELECT 
           em.*,
+          c.control_id as control_id_string,
+          c.category,
+          c.subcategory,
           json_agg(
             CASE WHEN ei.id IS NOT NULL THEN
               json_build_object(
@@ -1119,10 +1123,11 @@ Guidelines:
         FROM evidence_mappings em
         LEFT JOIN evidence_items ei ON em.id = ei.evidence_mapping_id
         LEFT JOIN documents d ON ei.document_id = d.id
+        LEFT JOIN controls c ON em.control_id::integer = c.id
         WHERE em.analysis_id = ${analysisId}
         GROUP BY em.id, em.analysis_id, em.control_id, em.control_title, 
                  em.control_description, em.status, em.confidence_score, 
-                 em.reasoning, em.created_at
+                 em.reasoning, em.created_at, c.control_id, c.category, c.subcategory
         ORDER BY em.control_id
       `;
 
@@ -1132,6 +1137,9 @@ Guidelines:
         controlId: mapping.control_id,
         controlTitle: mapping.control_title,
         controlDescription: mapping.control_description,
+        controlIdString: mapping.control_id_string,
+        controlCategory: mapping.category,
+        controlSubcategory: mapping.subcategory,
         status: mapping.status,
         confidenceScore: mapping.confidence_score,
         reasoning: mapping.reasoning,
