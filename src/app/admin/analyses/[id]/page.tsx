@@ -82,7 +82,7 @@ export default function AnalysisResultsPage() {
   const [results, setResults] = useState<AnalysisResults | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'overview' | 'evidence' | 'documents'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'evidence'>('overview');
   const [selectedMapping, setSelectedMapping] = useState<EvidenceMapping | null>(null);
   
   // Document viewer state
@@ -138,25 +138,27 @@ export default function AnalysisResultsPage() {
 
   const fetchResults = async () => {
     try {
-      const [analysisResponse, documentsResponse] = await Promise.all([
-        fetch(`/api/admin/analyses/${analysisId}`),
-        fetch('/api/admin/processed-documents')
-      ]);
-      
-      const [analysisData, documentsData] = await Promise.all([
-        analysisResponse.json(),
-        documentsResponse.json()
-      ]);
+      const analysisResponse = await fetch(`/api/admin/analyses/${analysisId}`);
+      const analysisData = await analysisResponse.json();
       
       if (analysisData.success) {
-        setResults(analysisData.results);
+        // The API returns data directly at the root level, not nested under 'results'
+        const results = {
+          analysis: analysisData.analysis,
+          evidenceMappings: analysisData.evidenceMappings,
+          gapSummary: analysisData.gapSummary || { missingControls: [], lowConfidenceControls: [], recommendations: [] }
+        };
+        setResults(results);
         
         // Calculate line numbers for all evidence items
-        const evidenceMappings = analysisData.results.evidenceMappings || [];
+        const evidenceMappings = analysisData.evidenceMappings || [];
         const lineNumbers: {[key: string]: number} = {};
         
         for (const mapping of evidenceMappings) {
-          for (const evidence of mapping.evidenceItems) {
+          // Ensure evidenceItems is an array
+          const evidenceItems = Array.isArray(mapping.evidenceItems) ? mapping.evidenceItems : [];
+          
+          for (const evidence of evidenceItems) {
             const key = `${evidence.documentId}-${evidence.id}`;
             calculateLineNumber(evidence.documentId, evidence.evidenceText)
               .then(lineNum => {
@@ -178,9 +180,8 @@ export default function AnalysisResultsPage() {
         console.error('Failed to fetch results:', analysisData.error);
       }
       
-      if (documentsData.success) {
-        setDocuments(documentsData.documents || []);
-      }
+      // Always use only the documents that were actually used in this analysis
+      setDocuments(analysisData.documents || []);
     } catch (error) {
       console.error('Failed to fetch results:', error);
     } finally {
@@ -256,8 +257,7 @@ export default function AnalysisResultsPage() {
         <nav className="flex space-x-8">
           {[
             { id: 'overview', label: 'Overview', count: null },
-            { id: 'evidence', label: 'Evidence Mappings', count: evidenceMappings.length },
-            { id: 'documents', label: 'Documents', count: documents.length }
+            { id: 'evidence', label: 'Evidence Mappings', count: Array.isArray(evidenceMappings) ? evidenceMappings.length : 0 }
           ].map(tab => (
             <button
               key={tab.id}
@@ -357,13 +357,57 @@ export default function AnalysisResultsPage() {
               </div>
             </div>
           </div>
+
+          {/* Documents Used in Analysis */}
+          <div className="bg-white p-6 rounded-lg shadow">
+            <h3 className="text-lg font-semibold mb-4">Documents Used in Analysis</h3>
+            <div className="space-y-3">
+              {documents.map((document) => (
+                <div key={document.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-center space-x-3">
+                    <svg className="w-8 h-8 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
+                    </svg>
+                    <div>
+                      <h4 className="font-medium text-gray-900">{document.originalName}</h4>
+                      <div className="flex items-center space-x-4 text-sm text-gray-500">
+                        <span>Type: {document.fileType.split('/').pop()?.toUpperCase()}</span>
+                        <span>Size: {(document.fileSize / 1024 / 1024).toFixed(1)} MB</span>
+                        <span>Processed: {new Date(document.processedAt).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSelectedDocument({
+                        documentId: document.id,
+                        documentName: document.originalName,
+                        evidenceText: '',
+                        pageNumber: undefined
+                      });
+                      setViewerOpen(true);
+                    }}
+                    className="px-3 py-1 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    📄 View
+                  </button>
+                </div>
+              ))}
+              
+              {documents.length === 0 && (
+                <div className="text-center py-6 text-gray-500">
+                  <p>No documents found for this analysis.</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
       {/* Evidence Tab */}
       {activeTab === 'evidence' && (
         <div className="space-y-6">
-          {evidenceMappings.map((mapping) => (
+          {Array.isArray(evidenceMappings) ? evidenceMappings.map((mapping) => (
             <div key={mapping.id} className="bg-white rounded-lg shadow">
               {/* Control Header */}
               <div className="p-6 border-b border-gray-200">
@@ -412,7 +456,7 @@ export default function AnalysisResultsPage() {
                       <div>
                         <div className="font-medium text-gray-700 mb-1">Specificity:</div>
                         <div className="text-gray-800 text-sm leading-relaxed">
-                          {mapping.evidenceItems.length > 0 
+                          {Array.isArray(mapping.evidenceItems) && mapping.evidenceItems.length > 0 
                             ? `High - ${mapping.evidenceItems.length} specific evidence item${mapping.evidenceItems.length === 1 ? '' : 's'} directly address${mapping.evidenceItems.length === 1 ? 'es' : ''} this control`
                             : 'Low - No specific evidence found that directly addresses this control'
                           }
@@ -439,7 +483,7 @@ export default function AnalysisResultsPage() {
               </div>
 
               {/* Supporting Evidence */}
-              {mapping.evidenceItems && mapping.evidenceItems.length > 0 && (
+              {Array.isArray(mapping.evidenceItems) && mapping.evidenceItems.length > 0 && (
                 <div className="p-6">
                   <h4 className="text-lg font-semibold text-gray-900 mb-4">Supporting Evidence ({mapping.evidenceItems.length})</h4>
                   <div className="space-y-3">
@@ -487,7 +531,7 @@ export default function AnalysisResultsPage() {
               )}
 
               {/* No Evidence Found */}
-              {(!mapping.evidenceItems || mapping.evidenceItems.length === 0) && (
+              {(!Array.isArray(mapping.evidenceItems) || mapping.evidenceItems.length === 0) && (
                 <div className="p-6 text-center">
                   <div className="text-gray-400 text-4xl mb-2">📋</div>
                   <h4 className="text-gray-600 font-medium mb-1">No Supporting Evidence Found</h4>
@@ -495,72 +539,15 @@ export default function AnalysisResultsPage() {
                 </div>
               )}
             </div>
-          ))}
+          )) : (
+            <div className="text-center py-8 text-gray-500">
+              <p className="text-lg">No evidence mappings found</p>
+              <p className="text-sm mt-1">The analysis may still be processing or failed to complete.</p>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Documents Tab */}
-      {activeTab === 'documents' && (
-        <div className="space-y-4">
-          <div className="bg-white rounded-lg shadow">
-            <div className="p-6 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">Analysis Documents</h3>
-              <p className="text-sm text-gray-600 mt-1">Documents that were processed and used for this compliance analysis</p>
-            </div>
-            <div className="divide-y divide-gray-200">
-              {documents.map((document) => (
-                <div key={document.id} className="p-6 hover:bg-gray-50 transition-colors">
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-3 mb-2">
-                        <svg className="w-8 h-8 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd" />
-                        </svg>
-                        <div>
-                          <h4 className="text-lg font-medium text-gray-900">{document.originalName}</h4>
-                          <div className="flex items-center space-x-4 text-sm text-gray-500 mt-1">
-                            <span>Type: {document.fileType.toUpperCase()}</span>
-                            <span>Size: {(document.fileSize / 1024 / 1024).toFixed(1)} MB</span>
-                            <span>Processed: {new Date(document.processedAt).toLocaleDateString()}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setSelectedDocument({
-                          documentId: document.id,
-                          documentName: document.originalName,
-                          evidenceText: '',
-                          pageNumber: undefined
-                        });
-                        setViewerOpen(true);
-                      }}
-                      className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                      <span>View Document</span>
-                    </button>
-                  </div>
-                </div>
-              ))}
-              
-              {documents.length === 0 && (
-                <div className="p-12 text-center">
-                  <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Documents Found</h3>
-                  <p className="text-gray-600">No processed documents are available for this analysis.</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Markdown Viewer Modal */}
       {selectedDocument && (

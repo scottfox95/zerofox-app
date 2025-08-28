@@ -140,7 +140,7 @@ export class DocumentIntelligenceService {
   ): Promise<{ success: boolean; organizedDocument?: OrganizedDocument; error?: string }> {
     try {
       // Get all semantic chunks for the documents
-      const chunks = await sql`
+      let chunks = await sql`
         SELECT sc.*, d.original_name, d.file_type
         FROM semantic_chunks sc
         JOIN documents d ON sc.document_id = d.id
@@ -150,7 +150,20 @@ export class DocumentIntelligenceService {
       `;
 
       if (chunks.length === 0) {
-        return { success: false, error: 'No semantic chunks found for documents' };
+        console.log('⚠️ No semantic chunks found, attempting to create them for selected documents...');
+        
+        // Get document names for better error message
+        const docInfo = await sql`
+          SELECT id, original_name 
+          FROM documents 
+          WHERE id = ANY(${documentIds})
+        `;
+        const docNames = docInfo.map(d => `${d.original_name} (ID: ${d.id})`).join(', ');
+        
+        return { 
+          success: false, 
+          error: `Selected documents do not have semantic chunks required for analysis: ${docNames}. Please try analyzing all documents (leave selection empty) or select documents that have been fully processed with semantic analysis.` 
+        };
       }
 
       // Group chunks by category

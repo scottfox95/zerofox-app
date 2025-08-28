@@ -2,6 +2,7 @@ import { sql } from './db';
 import { AIService } from './ai';
 import { DocumentIntelligenceService, OrganizedDocument, AttributionMap } from './document-intelligence';
 import { consoleLogger } from './console-logger';
+import PerformanceMonitor from './performance-monitor';
 
 export interface EvidenceMapping {
   id?: number;
@@ -110,8 +111,25 @@ export class EvidenceAnalyzer {
   async startAnalysis(
     organizationId: number, 
     frameworkId: number,
-    documentIds?: number[]
+    documentIds?: number[],
+    options?: {
+      testMode?: 'quick' | 'full';
+      selectedModel?: string;
+      customControlCount?: number;
+    }
   ): Promise<{ success: boolean; analysisId?: number; error?: string }> {
+    const analysisTimer = PerformanceMonitor.startTimer(
+      'analysis',
+      'startAnalysis',
+      { 
+        frameworkId, 
+        organizationId, 
+        documentCount: documentIds?.length || 0,
+        testMode: options?.testMode,
+        selectedModel: options?.selectedModel
+      }
+    );
+
     try {
       consoleLogger.analysisStep('Starting new analysis', `Framework ID: ${frameworkId}, Documents: ${documentIds?.length || 'all'}`);
       
@@ -123,18 +141,31 @@ export class EvidenceAnalyzer {
 
       if (frameworkResult.length === 0) {
         consoleLogger.error('Framework not found', 'ANALYSIS', { frameworkId });
+        await analysisTimer.end(false, 'Framework not found');
         return { success: false, error: 'Framework not found' };
       }
 
       const framework = frameworkResult[0];
-      consoleLogger.analysisStep('Framework loaded', `${framework.name} with ${framework.controls_count || 0} controls`);
 
-      // Get controls for this framework (LIMITED TO 3 FOR TESTING)
-      const controlsResult = await sql`
+      // Get controls for this framework
+      let controlsQuery = sql`
         SELECT * FROM controls WHERE framework_id = ${frameworkId}
         ORDER BY control_id
-        LIMIT 3
       `;
+      
+      // Apply test mode limiting
+      if (options?.testMode === 'quick') {
+        const limit = options?.customControlCount || 5;
+        controlsQuery = sql`
+          SELECT * FROM controls WHERE framework_id = ${frameworkId}
+          ORDER BY control_id
+          LIMIT ${limit}
+        `;
+        consoleLogger.analysisStep('Quick test mode', `Limited to ${limit} controls for cost-effective testing`);
+      }
+      
+      const controlsResult = await controlsQuery;
+      consoleLogger.analysisStep('Framework loaded', `${framework.name} with ${controlsResult.length} controls`);
 
       // Create analysis record
       consoleLogger.analysisStep('Creating analysis record', `${controlsResult.length} controls to analyze`);
@@ -164,9 +195,16 @@ export class EvidenceAnalyzer {
       const analysis = analysisResult[0] as Analysis;
 
       // Start async analysis process
-      this.performAnalysis(analysis.id!, organizationId, controlsResult, documentIds, framework)
+      this.performAnalysis(analysis.id!, organizationId, controlsResult, documentIds, framework, options)
         .catch(error => {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown analysis error';
           console.error('Analysis failed:', error);
+          consoleLogger.error(`Analysis ${analysis.id} failed: ${errorMessage}`, 'ANALYSIS', { 
+            analysisId: analysis.id, 
+            frameworkId,
+            error: errorMessage,
+            stack: error instanceof Error ? error.stack : undefined
+          });
           // Update analysis status to failed
           sql`
             UPDATE analyses 
@@ -175,8 +213,13 @@ export class EvidenceAnalyzer {
           `.catch(console.error);
         });
 
+      analysisTimer.addMetadata('analysisId', analysis.id);
+      analysisTimer.addMetadata('controlCount', controlsResult.length);
+      await analysisTimer.end(true);
+      
       return { success: true, analysisId: analysis.id };
     } catch (error) {
+      await analysisTimer.end(false, error instanceof Error ? error.message : 'Failed to start analysis');
       return { 
         success: false, 
         error: error instanceof Error ? error.message : 'Failed to start analysis' 
@@ -189,9 +232,30 @@ export class EvidenceAnalyzer {
     organizationId: number, 
     controls: any[], 
     documentIds?: number[],
-    framework?: any
+    framework?: any,
+    options?: {
+      testMode?: 'quick' | 'full';
+      selectedModel?: string;
+      customControlCount?: number;
+    }
   ): Promise<void> {
+    const performAnalysisTimer = PerformanceMonitor.startTimer(
+      'analysis',
+      'performAnalysis',
+      { 
+        analysisId, 
+        organizationId, 
+        controlCount: controls.length, 
+        documentCount: documentIds?.length || 0,
+        frameworkId: framework?.id,
+        frameworkName: framework?.name 
+      }
+    );
+
     const startTime = Date.now();
+    let aiCallsCount = 0;
+    let totalAITokens = 0;
+    let successfulControls = 0;
 
     try {
       // Step 1: Determine which documents to use
@@ -212,43 +276,71 @@ export class EvidenceAnalyzer {
       }
 
       // Step 2: Check if organized master document exists, if not create it
+      const docOrgTimer = PerformanceMonitor.startTimer(
+        'document_organization',
+        'getOrCreateOrganizedDocument',
+        { organizationId, targetDocumentCount: targetDocumentIds.length }
+      );
+
       let organizedDocument = await this.intelligenceService.getOrganizedDocument(organizationId);
       
-      if (!organizedDocument) {
-        console.log('📋 Creating organized master document for analysis...');
+      // If specific documents were selected or no organized document exists, create/recreate it
+      const specificDocsSelected = documentIds && documentIds.length > 0;
+      if (!organizedDocument || specificDocsSelected) {
+        console.log(`📋 ${specificDocsSelected ? 'Creating focused' : 'Creating initial'} organized master document for analysis...`);
         const organizationResult = await this.intelligenceService.createOrganizedMasterDocument(
           organizationId,
           targetDocumentIds
         );
         
         if (!organizationResult.success || !organizationResult.organizedDocument) {
+          await docOrgTimer.end(false, organizationResult.error);
           throw new Error(`Failed to create organized document: ${organizationResult.error}`);
         }
         
         organizedDocument = organizationResult.organizedDocument;
+        docOrgTimer.addMetadata('documentCreated', true);
+        docOrgTimer.addMetadata('documentRecreated', specificDocsSelected);
+        docOrgTimer.addMetadata('categories', organizedDocument.categories?.length || 0);
+      } else {
+        docOrgTimer.addMetadata('documentCreated', false);
+        docOrgTimer.addMetadata('documentExists', true);
       }
+
+      await docOrgTimer.end(true);
 
       // Step 3: Get attribution mappings for source attribution
       const attributions = await this.intelligenceService.getAttributionMappings(organizedDocument.id!);
 
       // Step 4: Get both semantic chunks and original text chunks for comprehensive analysis
-      const semanticChunks = await sql`
-        SELECT sc.*, d.original_name, d.id as document_id
-        FROM semantic_chunks sc
-        JOIN documents d ON sc.document_id = d.id
-        WHERE d.organization_id = ${organizationId}
-        AND d.id = ANY(${targetDocumentIds})
-        ORDER BY sc.relevance_score DESC, sc.chunk_index
-      `;
+      const dataFetchTimer = PerformanceMonitor.startTimer(
+        'data_fetch',
+        'getAnalysisChunks',
+        { organizationId, targetDocumentCount: targetDocumentIds.length }
+      );
 
-      const originalChunks = await sql`
-        SELECT tc.*, d.original_name, d.id as document_id
-        FROM text_chunks tc
-        JOIN documents d ON tc.document_id = d.id
-        WHERE d.organization_id = ${organizationId}
-        AND d.id = ANY(${targetDocumentIds})
-        ORDER BY tc.document_id, tc.chunk_index
-      `;
+      const [semanticChunks, originalChunks] = await Promise.all([
+        sql`
+          SELECT sc.*, d.original_name, d.id as document_id
+          FROM semantic_chunks sc
+          JOIN documents d ON sc.document_id = d.id
+          WHERE d.organization_id = ${organizationId}
+          AND d.id = ANY(${targetDocumentIds})
+          ORDER BY sc.relevance_score DESC, sc.chunk_index
+        `,
+        sql`
+          SELECT tc.*, d.original_name, d.id as document_id
+          FROM text_chunks tc
+          JOIN documents d ON tc.document_id = d.id
+          WHERE d.organization_id = ${organizationId}
+          AND d.id = ANY(${targetDocumentIds})
+          ORDER BY tc.document_id, tc.chunk_index
+        `
+      ]);
+
+      dataFetchTimer.addMetadata('semanticChunkCount', semanticChunks.length);
+      dataFetchTimer.addMetadata('originalChunkCount', originalChunks.length);
+      await dataFetchTimer.end(true);
 
       console.log(`📊 Analysis data: ${semanticChunks.length} semantic chunks + ${originalChunks.length} original chunks`);
 
@@ -257,23 +349,51 @@ export class EvidenceAnalyzer {
       let partialCount = 0;
       let missingCount = 0;
       let totalConfidence = 0;
+      const controlTimers: Array<{ controlId: string; timer: any }> = [];
 
       for (const control of controls) {
-        const mappingResult = await this.analyzeControlEvidenceHybrid(
-          analysisId,
-          control,
-          organizedDocument,
-          attributions,
-          semanticChunks,
-          originalChunks,
-          framework
+        const controlTimer = PerformanceMonitor.startTimer(
+          'control_analysis',
+          'analyzeControlEvidence',
+          { 
+            controlId: control.id,
+            controlTitle: control.title,
+            analysisId,
+            frameworkId: framework?.id 
+          }
         );
 
-        if (mappingResult.status === 'compliant') compliantCount++;
-        else if (mappingResult.status === 'partial') partialCount++;
-        else missingCount++;
+        try {
+          const mappingResult = await this.analyzeControlEvidenceHybrid(
+            analysisId,
+            control,
+            organizedDocument,
+            attributions,
+            semanticChunks,
+            originalChunks,
+            framework,
+            options?.selectedModel
+          );
 
-        totalConfidence += mappingResult.confidenceScore;
+          if (mappingResult.status === 'compliant') compliantCount++;
+          else if (mappingResult.status === 'partial') partialCount++;
+          else missingCount++;
+
+          totalConfidence += mappingResult.confidenceScore;
+          successfulControls++;
+          
+          controlTimer.addMetadata('status', mappingResult.status);
+          controlTimer.addMetadata('confidenceScore', mappingResult.confidenceScore);
+          await controlTimer.end(true);
+          
+          // Assume each control makes 1 AI call - will be more precise when we instrument AI service
+          aiCallsCount++;
+          
+        } catch (error) {
+          console.error(`Failed to process control ${control.id}:`, error);
+          controlTimer.addMetadata('status', 'failed');
+          await controlTimer.end(false, error instanceof Error ? error.message : 'Control processing failed');
+        }
       }
 
       const averageConfidence = controls.length > 0 ? totalConfidence / controls.length : 0;
@@ -292,6 +412,25 @@ export class EvidenceAnalyzer {
         WHERE id = ${analysisId}
       `;
 
+      // Record comprehensive analysis session metrics
+      await PerformanceMonitor.recordAnalysisSession({
+        analysisId,
+        totalDuration: processingTime,
+        controlsProcessed: controls.length,
+        documentsProcessed: targetDocumentIds.length,
+        aiCallsCount,
+        totalAITokens, // Will be more accurate when AI service is instrumented
+        averageControlTime: controls.length > 0 ? processingTime / controls.length : 0,
+        successRate: (successfulControls / controls.length) * 100
+      });
+
+      performAnalysisTimer.addMetadata('compliantCount', compliantCount);
+      performAnalysisTimer.addMetadata('partialCount', partialCount);
+      performAnalysisTimer.addMetadata('missingCount', missingCount);
+      performAnalysisTimer.addMetadata('averageConfidence', averageConfidence);
+      performAnalysisTimer.addMetadata('successfulControls', successfulControls);
+      await performAnalysisTimer.end(true);
+
     } catch (error) {
       console.error('Analysis processing failed:', error);
       await sql`
@@ -300,6 +439,8 @@ export class EvidenceAnalyzer {
           completed_at = CURRENT_TIMESTAMP
         WHERE id = ${analysisId}
       `;
+      
+      await performAnalysisTimer.end(false, error instanceof Error ? error.message : 'Analysis processing failed');
       throw error;
     }
   }
@@ -311,14 +452,17 @@ export class EvidenceAnalyzer {
     attributions: AttributionMap[],
     semanticChunks: any[],
     originalChunks: any[],
-    framework?: any
+    framework?: any,
+    selectedModel?: string
   ): Promise<EvidenceMapping> {
     try {
       // Create enhanced hybrid prompt using both organized document and comprehensive chunks
       const analysisPrompt = await this.createHybridAnalysisPrompt(control, organizedDocument, attributions, semanticChunks, originalChunks, framework);
       
-      // Get AI analysis
-      const aiResponse = await this.aiService.generateResponse(analysisPrompt, 'claude', 4000); // Increase token limit for more comprehensive analysis
+      // Get AI analysis using selected model
+      const modelToUse = selectedModel || 'claude';
+      consoleLogger.analysisStep('AI Analysis', `Using model: ${modelToUse} for control ${control.id}`);
+      const aiResponse = await this.aiService.generateResponse(analysisPrompt, modelToUse, 4000, 'control_evidence_analysis'); // Increase token limit for more comprehensive analysis
       
       // Parse AI response with enhanced attribution mapping
       const parsedResponse = this.parseHybridEvidenceResponse(aiResponse, attributions, originalChunks);
@@ -416,7 +560,7 @@ export class EvidenceAnalyzer {
       const analysisPrompt = await this.createMasterDocAnalysisPrompt(control, organizedDocument, attributions);
       
       // Get AI analysis
-      const aiResponse = await this.aiService.generateResponse(analysisPrompt, 'claude');
+      const aiResponse = await this.aiService.generateResponse(analysisPrompt, 'claude', 2000, 'master_doc_analysis');
       
       // Parse AI response with attribution mapping
       const parsedResponse = this.parseMasterDocEvidenceResponse(aiResponse, attributions);
@@ -513,7 +657,7 @@ export class EvidenceAnalyzer {
       const analysisPrompt = await this.createEvidenceAnalysisPrompt(control, chunks);
       
       // Get AI analysis
-      const aiResponse = await this.aiService.generateResponse(analysisPrompt, 'claude');
+      const aiResponse = await this.aiService.generateResponse(analysisPrompt, 'claude', 2000, 'basic_evidence_analysis');
       
       // Parse AI response
       const parsedResponse = this.parseEvidenceResponse(aiResponse);
@@ -850,6 +994,51 @@ Guidelines:
 - Be conservative with "compliant" status - require strong evidence`;
   }
 
+  private parseRobustJSON(jsonString: string): any {
+    try {
+      // First try standard JSON parsing
+      return JSON.parse(jsonString);
+    } catch (error) {
+      console.log('Standard JSON parsing failed, trying robust parsing...');
+      
+      try {
+        // Common Gemini issues: fix malformed arrays
+        let cleanedJson = jsonString;
+        
+        // Fix trailing commas in arrays and objects
+        cleanedJson = cleanedJson.replace(/,(\s*[}\]])/g, '$1');
+        
+        // Fix missing commas between array elements (common Gemini issue)
+        cleanedJson = cleanedJson.replace(/}(\s*){/g, '}, {');
+        
+        // Fix incomplete closing brackets in arrays
+        const openBrackets = (cleanedJson.match(/\[/g) || []).length;
+        const closeBrackets = (cleanedJson.match(/\]/g) || []).length;
+        if (openBrackets > closeBrackets) {
+          cleanedJson += ']'.repeat(openBrackets - closeBrackets);
+        }
+        
+        // Try parsing again
+        return JSON.parse(cleanedJson);
+      } catch (secondError) {
+        console.log('Robust JSON parsing also failed, using fallback response...');
+        
+        // Extract basic fields with regex as last resort
+        const status = jsonString.match(/"status":\s*"([^"]+)"/)?.[1] || 'missing';
+        const confidenceScore = jsonString.match(/"confidenceScore":\s*(\d+)/)?.[1] || '0';
+        const reasoningMatch = jsonString.match(/"reasoning":\s*"([^"]*(?:\\.[^"]*)*)"/);
+        const reasoning = reasoningMatch?.[1]?.replace(/\\"/g, '"') || 'Failed to parse AI analysis response';
+        
+        return {
+          status: status as 'compliant' | 'partial' | 'missing',
+          confidenceScore: parseInt(confidenceScore),
+          reasoning: reasoning,
+          evidenceItems: [] // Empty array as fallback
+        };
+      }
+    }
+  }
+
   private parseHybridEvidenceResponse(
     response: string,
     attributions: AttributionMap[],
@@ -869,13 +1058,20 @@ Guidelines:
     }>;
   } {
     try {
-      // Clean the response to extract JSON
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      // Clean the response to extract JSON - handle markdown code blocks that Gemini uses
+      let cleanedResponse = response;
+      
+      // Remove markdown code block formatting that Gemini often adds
+      cleanedResponse = cleanedResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+      cleanedResponse = cleanedResponse.replace(/`([^`]+)`/g, '$1'); // Remove single backticks
+      
+      const jsonMatch = cleanedResponse.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
+        console.error('Gemini response parsing failed - no JSON found in response:', cleanedResponse.substring(0, 500) + '...');
         throw new Error('No JSON found in response');
       }
 
-      const parsed = JSON.parse(jsonMatch[0]);
+      const parsed = this.parseRobustJSON(jsonMatch[0]);
       
       const evidenceItems = (parsed.evidenceItems || []).map((item: any) => {
         // Handle both semantic and comprehensive chunk references

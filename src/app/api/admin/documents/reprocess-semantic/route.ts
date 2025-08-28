@@ -72,6 +72,13 @@ export async function POST(request: NextRequest) {
         reasoning = EXCLUDED.reasoning
     `;
 
+    // Clear existing semantic chunks first to avoid unique constraint violations
+    console.log('🧹 Clearing existing semantic chunks...');
+    const deleteResult = await sql`
+      DELETE FROM semantic_chunks WHERE document_id = ${documentId}
+    `;
+    console.log(`🧹 Deleted ${deleteResult.count || 0} existing semantic chunks`);
+
     // Create semantic chunks
     console.log('🧠 Creating semantic chunks...');
     const semanticChunks = await intelligenceService.createSemanticChunks(

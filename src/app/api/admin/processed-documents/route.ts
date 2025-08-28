@@ -9,7 +9,8 @@ export async function GET(request: NextRequest) {
     const documents = await sql`
       SELECT 
         d.*,
-        (SELECT COUNT(*) FROM text_chunks WHERE document_id = d.id) as chunk_count
+        (SELECT COUNT(*) FROM text_chunks WHERE document_id = d.id) as text_chunk_count,
+        (SELECT COUNT(*) FROM semantic_chunks WHERE document_id = d.id) as semantic_chunk_count
       FROM documents d
       ORDER BY d.created_at DESC
     `;
@@ -19,12 +20,12 @@ export async function GET(request: NextRequest) {
     
     // Log each document for debugging
     documents.forEach((doc, index) => {
-      console.log(`📋 Doc ${index + 1}: ID=${doc.id}, Name="${doc.original_name}", Processed=${doc.processed_at ? 'YES' : 'NO'}, Chunks=${doc.chunk_count}`);
+      console.log(`📋 Doc ${index + 1}: ID=${doc.id}, Name="${doc.original_name}", Processed=${doc.processed_at ? 'YES' : 'NO'}, TextChunks=${doc.text_chunk_count}, SemanticChunks=${doc.semantic_chunk_count}`);
     });
     
     // Transform documents to match frontend interface
     const transformedDocuments = documents
-      .filter(doc => doc.processed_at) // Only include processed documents for analysis
+      .filter(doc => doc.processed_at && (doc.semantic_chunk_count > 0 || doc.text_chunk_count > 0)) // Only include documents with analysis-ready chunks
       .map(doc => ({
         id: doc.id,
         originalName: doc.original_name,
@@ -33,7 +34,8 @@ export async function GET(request: NextRequest) {
         fileSize: doc.file_size,
         processedAt: doc.processed_at,
         createdAt: doc.created_at,
-        chunkCount: parseInt(doc.chunk_count) || 0,
+        chunkCount: parseInt(doc.text_chunk_count) || 0,
+        semanticChunkCount: parseInt(doc.semantic_chunk_count) || 0,
         uploadPath: doc.upload_path,
         hasMarkdown: !!doc.markdown_content
       }));

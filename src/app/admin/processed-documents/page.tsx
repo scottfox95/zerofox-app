@@ -379,10 +379,10 @@ export default function ProcessedDocumentsPage() {
                   />
                   
                   <div className="text-2xl">
-                    {getFileTypeLabel(doc.file_type) === 'PDF' ? '📄' : 
-                     getFileTypeLabel(doc.file_type) === 'JSON' ? '📋' : 
-                     getFileTypeLabel(doc.file_type) === 'DOCX' ? '📝' : 
-                     getFileTypeLabel(doc.file_type) === 'MD' ? '📄' : '📄'}
+                    {getFileTypeLabel(doc.fileType) === 'PDF' ? '📄' : 
+                     getFileTypeLabel(doc.fileType) === 'JSON' ? '📋' : 
+                     getFileTypeLabel(doc.fileType) === 'DOCX' ? '📝' : 
+                     getFileTypeLabel(doc.fileType) === 'MD' ? '📄' : '📄'}
                   </div>
                   
                   <div>

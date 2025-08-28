@@ -54,6 +54,12 @@ export default function AdminLayout({
                   Analyses
                 </Link>
                 <Link 
+                  href="/admin/performance" 
+                  className="text-gray-600 hover:text-aravo-red font-medium transition-colors"
+                >
+                  Performance
+                </Link>
+                <Link 
                   href="/admin/semantic-test" 
                   className="text-gray-600 hover:text-aravo-red font-medium transition-colors"
                 >

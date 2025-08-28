@@ -21,7 +21,8 @@ interface Analysis {
 interface Framework {
   id: number;
   name: string;
-  controlsCount: number;
+  controlsCount?: number;  // For backwards compatibility
+  control_count?: string;  // What the API actually returns
 }
 
 interface Document {
@@ -30,16 +31,28 @@ interface Document {
   processedAt: string;
 }
 
+interface AIModel {
+  id: string;
+  name: string;
+  provider: string;
+  description: string;
+  isActive: boolean;
+}
+
 export default function AnalysesPage() {
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [aiModels, setAiModels] = useState<AIModel[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedFramework, setSelectedFramework] = useState<number | null>(null);
   const [selectedDocuments, setSelectedDocuments] = useState<number[]>([]);
   const [creating, setCreating] = useState(false);
   const [showConsole, setShowConsole] = useState(false);
+  const [testMode, setTestMode] = useState<'quick' | 'full'>('quick');
+  const [selectedModel, setSelectedModel] = useState<string>('gpt-4o-mini');
+  const [customControlCount, setCustomControlCount] = useState<number>(5);
 
   useEffect(() => {
     // Log page access for demonstration
@@ -59,21 +72,24 @@ export default function AnalysesPage() {
 
   const fetchData = async () => {
     try {
-      const [analysesRes, frameworksRes, documentsRes] = await Promise.all([
+      const [analysesRes, frameworksRes, documentsRes, modelsRes] = await Promise.all([
         fetch('/api/admin/analyses'),
         fetch('/api/admin/frameworks'),
-        fetch('/api/admin/processed-documents')
+        fetch('/api/admin/processed-documents'),
+        fetch('/api/admin/ai-models')
       ]);
 
-      const [analysesData, frameworksData, documentsData] = await Promise.all([
+      const [analysesData, frameworksData, documentsData, modelsData] = await Promise.all([
         analysesRes.json(),
         frameworksRes.json(),
-        documentsRes.json()
+        documentsRes.json(),
+        modelsRes.json()
       ]);
 
       if (analysesData.success) setAnalyses(analysesData.analyses);
       if (frameworksData.success) setFrameworks(frameworksData.frameworks);
       if (documentsData.success) setDocuments(documentsData.documents);
+      if (modelsData.success) setAiModels(modelsData.models);
     } catch (error) {
       console.error('Failed to fetch data:', error);
     } finally {
@@ -94,7 +110,10 @@ export default function AnalysesPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           frameworkId: selectedFramework,
-          documentIds: selectedDocuments.length > 0 ? selectedDocuments : undefined
+          documentIds: selectedDocuments.length > 0 ? selectedDocuments : undefined,
+          testMode: testMode,
+          selectedModel: selectedModel,
+          customControlCount: testMode === 'quick' ? customControlCount : undefined
         })
       });
 
@@ -156,6 +175,36 @@ export default function AnalysesPage() {
     return `${minutes}m`;
   };
 
+  const estimateCost = (framework: Framework | null, modelId: string, isQuickTest: boolean, customControlCount?: number) => {
+    if (!framework) return { cost: 0, controlCount: 0, tokens: 0 };
+    
+    // Handle both API formats and custom control count
+    const totalControlsInFramework = framework.controlsCount || parseInt(framework.control_count || '0');
+    const controlCount = customControlCount 
+      ? Math.min(customControlCount, totalControlsInFramework)
+      : isQuickTest 
+        ? Math.min(5, totalControlsInFramework) 
+        : totalControlsInFramework;
+    const avgTokensPerControl = 8000; // Conservative estimate
+    const totalTokens = controlCount * avgTokensPerControl;
+    
+    // Pricing per 1M tokens (input + output combined estimate)
+    const pricing: Record<string, number> = {
+      'claude-sonnet': 3.50,
+      'gpt-4o': 2.50, 
+      'gpt-4o-mini': 0.15,
+      'gemini-flash': 0.075
+    };
+    
+    const pricePerMillion = pricing[modelId] || 1.0;
+    const cost = (totalTokens / 1000000) * pricePerMillion;
+    
+    return { cost, controlCount, tokens: totalTokens };
+  };
+
+  const getSelectedFramework = () => frameworks.find(f => f.id === selectedFramework);
+  const costEstimate = estimateCost(getSelectedFramework() || null, selectedModel, testMode === 'quick', testMode === 'quick' ? customControlCount : undefined);
+
   if (loading) {
     return (
       <div className="p-8">
@@ -214,6 +263,110 @@ export default function AnalysesPage() {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Testing Presets */}
+            <div className="mb-6 p-4 bg-gray-50 rounded-lg border">
+              <h3 className="text-sm font-semibold text-gray-800 mb-3">Analysis Configuration</h3>
+              
+              {/* Quick Preset Toggle */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTestMode('quick');
+                    setSelectedModel('gpt-4o-mini');
+                  }}
+                  className={`p-3 rounded-lg border text-left transition-all ${
+                    testMode === 'quick'
+                      ? 'border-blue-500 bg-blue-50 text-blue-900'
+                      : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="font-medium">🚀 Quick Test</div>
+                  <div className="text-xs text-gray-600 mt-1">{customControlCount} controls max • GPT-4o Mini</div>
+                  <div className="text-xs font-medium text-green-600 mt-1">Cost effective</div>
+                </button>
+                
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTestMode('full');
+                    setSelectedModel('claude-sonnet');
+                  }}
+                  className={`p-3 rounded-lg border text-left transition-all ${
+                    testMode === 'full'
+                      ? 'border-blue-500 bg-blue-50 text-blue-900'
+                      : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                  }`}
+                >
+                  <div className="font-medium">🎯 Full Analysis</div>
+                  <div className="text-xs text-gray-600 mt-1">All controls • Claude Sonnet 4</div>
+                  <div className="text-xs font-medium text-orange-600 mt-1">Premium quality</div>
+                </button>
+              </div>
+
+              {/* Custom Control Count for Quick Test */}
+              {testMode === 'quick' && (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Number of Controls to Test
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max={getSelectedFramework()?.controlsCount || parseInt(getSelectedFramework()?.control_count || '100')}
+                    value={customControlCount}
+                    onChange={(e) => setCustomControlCount(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Enter number of controls"
+                  />
+                  <div className="text-xs text-gray-500 mt-1">
+                    Maximum: {getSelectedFramework()?.controlsCount || parseInt(getSelectedFramework()?.control_count || '0')} controls available in framework
+                  </div>
+                </div>
+              )}
+
+              {/* Advanced Options */}
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    AI Model
+                  </label>
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {aiModels
+                      .filter(model => model.isActive)
+                      .map(model => (
+                        <option key={model.id} value={model.id}>
+                          {model.name} ({model.provider})
+                          {model.id.includes('mini') || model.id.includes('flash') ? ' - Cost Effective' : ''}
+                          {model.id.includes('claude') || model.id.includes('gpt-4o') ? ' - Premium' : ''}
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
+
+                {/* Cost Estimate */}
+                {selectedFramework && (
+                  <div className="bg-white p-3 rounded border">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-600">Estimated cost:</span>
+                      <span className={`font-semibold ${costEstimate.cost > 1 ? 'text-orange-600' : 'text-green-600'}`}>
+                        ${costEstimate.cost.toFixed(2)}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {costEstimate.controlCount} controls • ~{costEstimate.tokens.toLocaleString()} tokens
+                      {testMode === 'quick' && ' (limited to 5 controls for testing)'}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="mb-6">
