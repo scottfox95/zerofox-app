@@ -1,8 +1,13 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { sql } from './db';
+import { secureLog } from './secure-logger';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-fallback-secret-key';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET environment variable is required');
+}
 
 export interface User {
   id: number;
@@ -47,9 +52,9 @@ export const createUser = async (
   role: 'admin' | 'client' | 'demo' = 'client'
 ): Promise<User | null> => {
   try {
-    console.log('Creating user:', { email, name, role });
+    secureLog.info('Creating user:', { email, name, role });
     const hashedPassword = await hashPassword(password);
-    console.log('Password hashed successfully');
+    secureLog.debug('Password hashed successfully');
     
     const result = await sql`
       INSERT INTO users (email, password_hash, name, role)
@@ -57,11 +62,11 @@ export const createUser = async (
       RETURNING id, email, name, role, created_at
     `;
     
-    console.log('User insert successful:', result[0]);
+    secureLog.info('User insert successful:', result[0]);
     return result[0] as User;
   } catch (error) {
-    console.error('Create user error:', error);
-    console.error('Error details:', {
+    secureLog.error('Create user error:', error);
+    secureLog.error('Error details:', {
       message: error?.message || 'No error message',
       code: error?.code || 'No error code',
       constraint: error?.constraint || 'No constraint',

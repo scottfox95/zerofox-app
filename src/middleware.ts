@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { secureLog } from '@/lib/secure-logger';
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -7,11 +8,11 @@ export function middleware(request: NextRequest) {
     const token = request.cookies.get('token')?.value || 
                   request.headers.get('authorization')?.replace('Bearer ', '');
 
-    console.log('Middleware - Path:', pathname);
-    console.log('Middleware - Token found:', !!token);
+    secureLog.debug('Middleware - Path:', pathname);
+    secureLog.debug('Middleware - Token found:', !!token);
 
     if (!token) {
-      console.log('Middleware - No token, redirecting to login');
+      secureLog.debug('Middleware - No token, redirecting to login');
       return NextResponse.redirect(new URL('/login', request.url));
     }
 
@@ -19,10 +20,10 @@ export function middleware(request: NextRequest) {
     // Full verification happens in API routes
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
-      console.log('Middleware - Token payload:', payload);
+      secureLog.debug('Middleware - Token payload:', payload);
       
       if (!payload || !['admin', 'client', 'demo'].includes(payload.role)) {
-        console.log('Middleware - Invalid token or unauthorized role, redirecting to login');
+        secureLog.debug('Middleware - Invalid token or unauthorized role, redirecting to login');
         return NextResponse.redirect(new URL('/login', request.url));
       }
       
@@ -38,14 +39,14 @@ export function middleware(request: NextRequest) {
       const isAdminOnlyPath = adminOnlyPaths.some(path => pathname.startsWith(path));
       
       if (isAdminOnlyPath && payload.role !== 'admin') {
-        console.log(`Middleware - ${payload.role} attempted to access admin-only path: ${pathname}`);
+        secureLog.warn(`Middleware - ${payload.role} attempted to access admin-only path: ${pathname}`);
         return NextResponse.redirect(new URL('/admin', request.url));
       }
       
       // Log access granted with role
-      console.log(`Middleware - Access granted to ${payload.role}`);
+      secureLog.debug(`Middleware - Access granted to ${payload.role}`);
     } catch (error) {
-      console.log('Middleware - Token parsing failed:', error);
+      secureLog.error('Middleware - Token parsing failed:', error);
       return NextResponse.redirect(new URL('/login', request.url));
     }
   }
