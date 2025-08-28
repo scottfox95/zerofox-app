@@ -17,7 +17,7 @@ export const initializeDatabase = async () => {
         id SERIAL PRIMARY KEY,
         email VARCHAR(255) UNIQUE NOT NULL,
         name VARCHAR(255) NOT NULL,
-        role VARCHAR(20) DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+        role VARCHAR(20) DEFAULT 'client' CHECK (role IN ('admin', 'client', 'demo')),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
@@ -27,6 +27,31 @@ export const initializeDatabase = async () => {
     await sql`
       ALTER TABLE users 
       ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)
+    `;
+
+    // Update role constraint to support new roles and add demo limits
+    await sql`
+      ALTER TABLE users 
+      DROP CONSTRAINT IF EXISTS users_role_check
+    `;
+    await sql`
+      ALTER TABLE users 
+      ADD CONSTRAINT users_role_check CHECK (role IN ('admin', 'client', 'demo'))
+    `;
+    await sql`
+      ALTER TABLE users 
+      ADD COLUMN IF NOT EXISTS demo_limits JSONB DEFAULT '{
+        "max_documents": 10,
+        "max_analyses": 5,
+        "expires_at": null
+      }'::jsonb
+    `;
+
+    // Update existing users to have admin role if they currently have 'user' role
+    await sql`
+      UPDATE users 
+      SET role = 'admin' 
+      WHERE role = 'user'
     `;
 
     await sql`

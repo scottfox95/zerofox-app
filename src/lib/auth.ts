@@ -8,7 +8,7 @@ export interface User {
   id: number;
   email: string;
   name: string;
-  role: 'admin' | 'user';
+  role: 'admin' | 'client' | 'demo';
 }
 
 // Hash password
@@ -40,19 +40,33 @@ export const verifyToken = (token: string): any => {
 };
 
 // Create user
-export const createUser = async (email: string, password: string, name: string): Promise<User | null> => {
+export const createUser = async (
+  email: string, 
+  password: string, 
+  name: string, 
+  role: 'admin' | 'client' | 'demo' = 'client'
+): Promise<User | null> => {
   try {
+    console.log('Creating user:', { email, name, role });
     const hashedPassword = await hashPassword(password);
+    console.log('Password hashed successfully');
     
     const result = await sql`
       INSERT INTO users (email, password_hash, name, role)
-      VALUES (${email}, ${hashedPassword}, ${name}, 'user')
+      VALUES (${email}, ${hashedPassword}, ${name}, ${role})
       RETURNING id, email, name, role, created_at
     `;
     
+    console.log('User insert successful:', result[0]);
     return result[0] as User;
   } catch (error) {
     console.error('Create user error:', error);
+    console.error('Error details:', {
+      message: error?.message || 'No error message',
+      code: error?.code || 'No error code',
+      constraint: error?.constraint || 'No constraint',
+      detail: error?.detail || 'No detail'
+    });
     return null;
   }
 };

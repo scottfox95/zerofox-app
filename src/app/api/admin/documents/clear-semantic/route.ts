@@ -20,12 +20,12 @@ export async function POST(request: NextRequest) {
       DELETE FROM semantic_chunks WHERE document_id = ${documentId}
     `;
     
-    console.log(`🧹 Deleted ${deleteResult.count || 0} existing semantic chunks`);
+    console.log(`🧹 Deleted ${(deleteResult as any).count || 0} existing semantic chunks`);
     
     return NextResponse.json({
       success: true,
-      message: `Cleared ${deleteResult.count || 0} semantic chunks for document ${documentId}`,
-      deletedCount: deleteResult.count || 0
+      message: `Cleared ${(deleteResult as any).count || 0} semantic chunks for document ${documentId}`,
+      deletedCount: (deleteResult as any).count || 0
     });
     
   } catch (error) {

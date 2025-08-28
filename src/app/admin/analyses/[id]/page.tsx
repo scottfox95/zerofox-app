@@ -219,6 +219,88 @@ export default function AnalysisResultsPage() {
     setSelectedDocument(null);
   };
 
+  // Function to parse and format the assessment reasoning text
+  const formatAssessmentReasoning = (reasoning: string) => {
+    if (!reasoning) return null;
+
+    const sections = [
+      'Policy Level',
+      'Implementation Level', 
+      'Implimentation Level', // Handle common misspelling
+      'Monitoring Level',
+      'Management Commitment',
+      'Management Committment', // Handle common misspelling
+      'Gaps Identified',
+      'Gaps identified',
+      'Control Category Analysis', // Additional sections that might appear
+      'Assessment Summary',
+      'Evidence Review',
+      'Compliance Status'
+    ];
+
+    // First, try to detect if the text already has structured sections
+    const hasStructuredSections = sections.some(section => 
+      reasoning.toLowerCase().includes(section.toLowerCase() + ':')
+    );
+
+    if (!hasStructuredSections) {
+      // If no structured sections, return as-is with better formatting
+      return (
+        <div className="text-gray-700 text-sm leading-relaxed">
+          {reasoning}
+        </div>
+      );
+    }
+
+    // Split the reasoning by common section patterns
+    let formattedText = reasoning;
+    
+    sections.forEach(section => {
+      const regex = new RegExp(`(${section}:)`, 'gi');
+      formattedText = formattedText.replace(regex, `\n\n**$1**\n`);
+    });
+
+    // Split by double newlines to create sections
+    const parts = formattedText.split('\n\n').filter(part => part.trim());
+    
+    return (
+      <div className="space-y-3">
+        {parts.map((part, index) => {
+          const trimmedPart = part.trim();
+          if (trimmedPart.startsWith('**') && trimmedPart.includes(':**')) {
+            // This is a section header
+            const headerMatch = trimmedPart.match(/\*\*(.*?):\*\*/);
+            const content = trimmedPart.replace(/\*\*(.*?):\*\*\n?/, '').trim();
+            
+            if (headerMatch) {
+              return (
+                <div key={index} className="mb-4">
+                  <div className="font-semibold text-blue-800 mb-2 text-sm flex items-center">
+                    <div className="w-1 h-4 bg-blue-500 mr-2 rounded"></div>
+                    {headerMatch[1]}
+                  </div>
+                  <div className="text-gray-700 text-sm leading-relaxed pl-3 bg-blue-50 p-3 rounded border-l-3 border-blue-300">
+                    {content}
+                  </div>
+                </div>
+              );
+            }
+          }
+          
+          // Regular text
+          if (trimmedPart) {
+            return (
+              <div key={index} className="text-gray-700 text-sm leading-relaxed">
+                {trimmedPart}
+              </div>
+            );
+          }
+          return null;
+        })}
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="p-8">
@@ -414,11 +496,6 @@ export default function AnalysisResultsPage() {
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-3">
-                      {mapping.controlIdString && (
-                        <span className="px-3 py-1 bg-blue-50 text-blue-700 text-sm font-mono rounded-md border">
-                          {mapping.controlIdString}
-                        </span>
-                      )}
                       <span className={`px-3 py-1 text-sm font-semibold rounded-full ${getStatusColor(mapping.status)}`}>
                         {mapping.status}
                       </span>
@@ -426,7 +503,20 @@ export default function AnalysisResultsPage() {
                         {Math.round(mapping.confidenceScore)}% confidence
                       </span>
                     </div>
-                    <h3 className="text-xl font-semibold text-gray-900 mb-2">{mapping.controlTitle}</h3>
+                    <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                      {/* Show control ID - prefer controlIdString, fallback to controlId */}
+                      {mapping.controlIdString 
+                        ? `${mapping.controlIdString}: ` 
+                        : mapping.controlId 
+                          ? `#${mapping.controlId}: ` 
+                          : ''
+                      }
+                      
+                      {/* Capitalize title */}
+                      {mapping.controlTitle.split(' ').map(word => 
+                        word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+                      ).join(' ')}
+                    </h3>
                     
                     {/* Control Metadata */}
                     <div className="flex items-center space-x-6 text-sm text-gray-600 mb-3">
@@ -451,7 +541,7 @@ export default function AnalysisResultsPage() {
                 {/* Analysis Summary */}
                 <div className="bg-gray-50 rounded-lg p-4">
                   <h4 className="font-semibold text-gray-900 mb-4">Analysis Summary</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div className="space-y-4">
                       <div>
                         <div className="font-medium text-gray-700 mb-1">Specificity:</div>
@@ -474,9 +564,11 @@ export default function AnalysisResultsPage() {
                         </div>
                       </div>
                     </div>
-                    <div>
-                      <div className="font-medium text-gray-700 mb-1">Assessment:</div>
-                      <div className="text-gray-800 text-sm leading-relaxed">{mapping.reasoning}</div>
+                    <div className="md:col-span-2">
+                      <div className="font-semibold text-gray-900 mb-3 text-base">Detailed Assessment</div>
+                      <div className="bg-white rounded-lg p-4 border border-gray-200">
+                        {formatAssessmentReasoning(mapping.reasoning)}
+                      </div>
                     </div>
                   </div>
                 </div>

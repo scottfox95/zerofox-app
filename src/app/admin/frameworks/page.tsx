@@ -28,6 +28,7 @@ interface StandardizedFramework {
 }
 
 export default function FrameworksPage() {
+  const [user, setUser] = useState<{ role: 'admin' | 'client' | 'demo' } | null>(null);
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -42,6 +43,21 @@ export default function FrameworksPage() {
   const [migrating, setMigrating] = useState(false);
 
   useEffect(() => {
+    // Get user info from token
+    const token = document.cookie
+      .split('; ')
+      .find(row => row.startsWith('token='))
+      ?.split('=')[1];
+
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        setUser(payload);
+      } catch (error) {
+        console.error('Failed to parse token:', error);
+      }
+    }
+
     fetchFrameworks();
   }, []);
 
@@ -269,22 +285,50 @@ export default function FrameworksPage() {
     );
   }
 
+  const isAdmin = user?.role === 'admin';
+  const isDemo = user?.role === 'demo';
+
   return (
     <div className="space-y-8">
       {/* Page Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Framework Management</h1>
-        <button
-          onClick={migrateControlIds}
-          disabled={migrating}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {migrating ? '🔧 Migrating...' : '🔄 Fix Control IDs'}
-        </button>
+        <h1 className="text-3xl font-bold text-gray-900">
+          {isAdmin ? 'Framework Management' : isDemo ? 'Frameworks (Demo)' : 'Compliance Frameworks'}
+        </h1>
+        {isAdmin && (
+          <button
+            onClick={migrateControlIds}
+            disabled={migrating}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {migrating ? '🔧 Migrating...' : '🔄 Fix Control IDs'}
+          </button>
+        )}
       </div>
 
-      {/* Step Indicator */}
-      <div className="bg-white rounded-lg shadow-md p-6">
+      {/* Read-only notice for non-admin users */}
+      {!isAdmin && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center space-x-2">
+            <Eye className="h-5 w-5 text-blue-600" />
+            <div>
+              <h3 className="text-lg font-semibold text-blue-800">
+                {isDemo ? 'Demo Mode' : 'Framework Viewer'}
+              </h3>
+              <p className="text-blue-700 text-sm">
+                {isDemo 
+                  ? 'You are viewing compliance frameworks in demo mode. All frameworks and controls are read-only.'
+                  : 'You can view compliance frameworks and their controls, but management features require admin access.'
+                }
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Step Indicator - Admin Only */}
+      {isAdmin && (
+        <div className="bg-white rounded-lg shadow-md p-6">
         <div className="flex items-center justify-center space-x-4 mb-4">
           <div className={`flex items-center space-x-2 ${
             reviewMode === 'standardize' ? 'text-aravo-red font-semibold' : 
@@ -322,6 +366,7 @@ export default function FrameworksPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Upload and Standardization Section */}
       {reviewMode === 'standardize' && (
@@ -1045,12 +1090,21 @@ export default function FrameworksPage() {
           </div>
         </div>
       )}
-
-      {/* Existing Frameworks */}
-      {reviewMode === 'standardize' && (
+      
+      {/* Admin-only upload/management section ends here */}
+      
+      {/* Existing Frameworks - Available to All Users */}
+      {((isAdmin && reviewMode === 'standardize') || !isAdmin) && (
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-xl font-semibold text-gray-800 mb-4">Existing Frameworks</h3>
-          <p className="text-gray-600 mb-6">Click "👁️ Review Controls" on any framework to inspect all its controls and details.</p>
+          <h3 className="text-xl font-semibold text-gray-800 mb-4">
+            {isAdmin ? 'Existing Frameworks' : 'Available Frameworks'}
+          </h3>
+          <p className="text-gray-600 mb-6">
+            {isAdmin 
+              ? 'Click "👁️ Review Controls" on any framework to inspect all its controls and details.'
+              : 'View compliance frameworks and their controls. Click "👁️ View Controls" to explore framework details.'
+            }
+          </p>
         
         {frameworks.length === 0 ? (
           <div className="text-center py-8">
@@ -1091,17 +1145,19 @@ export default function FrameworksPage() {
                     onClick={() => reviewExistingFramework(framework.id)}
                     className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition-colors"
                   >
-                    👁️ Review Controls
+                    👁️ {isAdmin ? 'Review Controls' : 'View Controls'}
                   </button>
-                  <button
-                    onClick={async () => {
-                      await reviewExistingFramework(framework.id);
-                      setTimeout(() => editExistingFramework(), 100);
-                    }}
-                    className="flex-1 bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-700 transition-colors"
-                  >
-                    ✏️ Edit
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={async () => {
+                        await reviewExistingFramework(framework.id);
+                        setTimeout(() => editExistingFramework(), 100);
+                      }}
+                      className="flex-1 bg-gray-600 text-white px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-700 transition-colors"
+                    >
+                      ✏️ Edit
+                    </button>
+                  )}
                 </div>
               </div>
             ))}

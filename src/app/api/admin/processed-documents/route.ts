@@ -1,19 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
+import { verifyToken } from '@/lib/auth';
 
 export async function GET(request: NextRequest) {
   console.log('📋 GET /api/admin/processed-documents - Fresh database query');
   
   try {
-    // Direct query to get EXACTLY what's in the database right now
-    const documents = await sql`
-      SELECT 
-        d.*,
-        (SELECT COUNT(*) FROM text_chunks WHERE document_id = d.id) as text_chunk_count,
-        (SELECT COUNT(*) FROM semantic_chunks WHERE document_id = d.id) as semantic_chunk_count
-      FROM documents d
-      ORDER BY d.created_at DESC
-    `;
+    // Get user info from token
+    const token = request.cookies.get('token')?.value || 
+                  request.headers.get('authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const payload = verifyToken(token);
+    if (!payload) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+
+    // Admin users can see all documents, others see only their organization's documents
+    let documents;
+    if (payload.role === 'admin') {
+      // Admin sees all documents
+      documents = await sql`
+        SELECT 
+          d.*,
+          (SELECT COUNT(*) FROM text_chunks WHERE document_id = d.id) as text_chunk_count,
+          (SELECT COUNT(*) FROM semantic_chunks WHERE document_id = d.id) as semantic_chunk_count
+        FROM documents d
+        ORDER BY d.created_at DESC
+      `;
+    } else {
+      // Client and demo users see only their organization's documents
+      documents = await sql`
+        SELECT 
+          d.*,
+          (SELECT COUNT(*) FROM text_chunks WHERE document_id = d.id) as text_chunk_count,
+          (SELECT COUNT(*) FROM semantic_chunks WHERE document_id = d.id) as semantic_chunk_count
+        FROM documents d
+        INNER JOIN user_organizations uo ON d.organization_id = uo.organization_id
+        WHERE uo.user_id = ${payload.userId}
+        ORDER BY d.created_at DESC
+      `;
+    }
     
     console.log(`📋 ACTUAL DATABASE STATE: Found ${documents.length} documents`);
     console.log(`📋 Document IDs in database: [${documents.map(d => d.id).join(', ')}]`);

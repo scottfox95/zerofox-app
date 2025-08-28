@@ -11,7 +11,7 @@ export default function Home() {
           </p>
           <div className="flex gap-4 justify-center">
             <a
-              href="/(app)"
+              href="/admin/documents"
               className="bg-aravo-gradient text-white px-8 py-3 rounded-lg font-semibold hover:opacity-90 transition-opacity"
             >
               Get Started
@@ -20,7 +20,7 @@ export default function Home() {
               href="/admin"
               className="border-2 border-aravo-red text-aravo-red px-8 py-3 rounded-lg font-semibold hover:bg-aravo-red hover:text-white transition-colors"
             >
-              Admin Panel
+              Dashboard
             </a>
           </div>
         </div>

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { EvidenceAnalyzer } from '@/lib/evidence-analysis';
 import { consoleLogger } from '@/lib/console-logger';
+import { verifyToken } from '@/lib/auth';
+import { sql } from '@/lib/db';
 
 const analyzer = new EvidenceAnalyzer();
 
@@ -8,10 +10,64 @@ const analyzer = new EvidenceAnalyzer();
 export async function GET(request: NextRequest) {
   const startTime = Date.now();
   try {
+    // Get user info from token
+    const token = request.cookies.get('token')?.value || 
+                  request.headers.get('authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const payload = verifyToken(token);
+    if (!payload) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+
     consoleLogger.apiCall('GET', '/api/admin/analyses');
-    const organizationId = 1; // Default org for now
-    
-    const analyses = await analyzer.getAnalysesList(organizationId);
+
+    // Get user's organization ID
+    let organizationId = 1; // Default fallback
+    let analyses;
+
+    if (payload.role === 'admin') {
+      // Admin sees all analyses across all organizations
+      analyses = await sql`
+        SELECT * FROM analyses 
+        ORDER BY created_at DESC
+      `;
+      
+      // Transform to match the interface
+      analyses = analyses.map(row => ({
+        id: row.id,
+        organizationId: row.organization_id,
+        frameworkId: row.framework_id,
+        frameworkName: row.framework_name || '',
+        status: row.status,
+        totalControls: row.total_controls,
+        compliantControls: row.compliant_controls,
+        partialControls: row.partial_controls,
+        missingControls: row.missing_controls,
+        averageConfidence: row.average_confidence,
+        startedAt: row.started_at,
+        completedAt: row.completed_at,
+        processingTime: row.processing_time,
+        createdAt: row.created_at
+      }));
+    } else {
+      // Get user's organization
+      const userOrg = await sql`
+        SELECT organization_id 
+        FROM user_organizations 
+        WHERE user_id = ${payload.userId}
+        LIMIT 1
+      `;
+      
+      if (userOrg.length > 0) {
+        organizationId = userOrg[0].organization_id;
+      }
+      
+      analyses = await analyzer.getAnalysesList(organizationId);
+    }
     const duration = Date.now() - startTime;
     
     consoleLogger.apiCall('GET', '/api/admin/analyses', 200, duration, { count: analyses.length });
@@ -34,6 +90,19 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
   try {
+    // Get user info from token
+    const token = request.cookies.get('token')?.value || 
+                  request.headers.get('authorization')?.replace('Bearer ', '');
+
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const payload = verifyToken(token);
+    if (!payload) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+
     consoleLogger.apiCall('POST', '/api/admin/analyses');
     const body = await request.json();
     const { frameworkId, documentIds, testMode, selectedModel, customControlCount } = body;
@@ -47,7 +116,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const organizationId = 1; // Default org for now
+    // Get user's organization ID
+    let organizationId = 1; // Default fallback
+    if (payload.role !== 'admin') {
+      const userOrg = await sql`
+        SELECT organization_id 
+        FROM user_organizations 
+        WHERE user_id = ${payload.userId}
+        LIMIT 1
+      `;
+      
+      if (userOrg.length > 0) {
+        organizationId = userOrg[0].organization_id;
+      }
+    }
     consoleLogger.info('Starting analysis request', 'API', { 
       frameworkId, 
       documentIds: documentIds?.length || 'all',

@@ -30,10 +30,15 @@ export async function GET(
 
     const analysis = analysisResult[0];
 
-    // Get evidence mappings 
+    // Get evidence mappings with control details
     const evidenceMappings = await sql`
-      SELECT em.*
+      SELECT 
+        em.*,
+        c.control_id as control_id_string,
+        c.category,
+        c.subcategory
       FROM evidence_mappings em
+      LEFT JOIN controls c ON em.control_id::integer = c.id
       WHERE em.analysis_id = ${analysisId}
       ORDER BY em.control_id
     `;
@@ -108,6 +113,9 @@ export async function GET(
         controlId: em.control_id,
         controlTitle: em.control_title,
         controlDescription: em.control_description,
+        controlIdString: em.control_id_string, // Now includes the JOIN result like "A.5.1"
+        controlCategory: em.category,
+        controlSubcategory: em.subcategory,
         status: em.status,
         confidenceScore: parseFloat(em.confidence_score || 0),
         reasoning: em.reasoning,

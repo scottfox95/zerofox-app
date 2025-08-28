@@ -21,12 +21,29 @@ export function middleware(request: NextRequest) {
       const payload = JSON.parse(atob(token.split('.')[1]));
       console.log('Middleware - Token payload:', payload);
       
-      if (!payload || payload.role !== 'admin') {
-        console.log('Middleware - Invalid token or not admin, redirecting to login');
+      if (!payload || !['admin', 'client', 'demo'].includes(payload.role)) {
+        console.log('Middleware - Invalid token or unauthorized role, redirecting to login');
         return NextResponse.redirect(new URL('/login', request.url));
       }
       
-      console.log('Middleware - Access granted to admin');
+      // Check admin-only paths
+      const adminOnlyPaths = [
+        '/admin/ai-models',
+        '/admin/prompts', 
+        '/admin/performance',
+        '/admin/semantic-test',
+        '/admin/users' // New user management section
+      ];
+      
+      const isAdminOnlyPath = adminOnlyPaths.some(path => pathname.startsWith(path));
+      
+      if (isAdminOnlyPath && payload.role !== 'admin') {
+        console.log(`Middleware - ${payload.role} attempted to access admin-only path: ${pathname}`);
+        return NextResponse.redirect(new URL('/admin', request.url));
+      }
+      
+      // Log access granted with role
+      console.log(`Middleware - Access granted to ${payload.role}`);
     } catch (error) {
       console.log('Middleware - Token parsing failed:', error);
       return NextResponse.redirect(new URL('/login', request.url));

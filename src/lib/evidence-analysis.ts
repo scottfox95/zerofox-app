@@ -4,6 +4,8 @@ import { DocumentIntelligenceService, OrganizedDocument, AttributionMap } from '
 import { consoleLogger } from './console-logger';
 import PerformanceMonitor from './performance-monitor';
 
+import { updateAnalysisProgress, addInterimResult } from './progress-tracker';
+
 export interface EvidenceMapping {
   id?: number;
   analysisId: number;
@@ -258,6 +260,16 @@ export class EvidenceAnalyzer {
     let successfulControls = 0;
 
     try {
+      // Send initial progress
+      updateAnalysisProgress(analysisId.toString(), {
+        stage: 'initializing',
+        progress: 0,
+        currentStep: 'Setting up analysis environment...',
+        totalSteps: controls.length + 3, // +3 for setup steps
+        completedSteps: 0,
+        currentControl: null,
+        interimResults: []
+      });
       // Step 1: Determine which documents to use
       let targetDocumentIds = documentIds;
       
@@ -274,6 +286,14 @@ export class EvidenceAnalyzer {
       if (targetDocumentIds.length === 0) {
         throw new Error('No processed documents found for analysis');
       }
+
+      // Update progress: Documents identified
+      updateAnalysisProgress(analysisId.toString(), {
+        stage: 'document_preparation',
+        progress: 10,
+        currentStep: `Preparing ${targetDocumentIds.length} documents for analysis...`,
+        completedSteps: 1
+      });
 
       // Step 2: Check if organized master document exists, if not create it
       const docOrgTimer = PerformanceMonitor.startTimer(
@@ -308,6 +328,14 @@ export class EvidenceAnalyzer {
       }
 
       await docOrgTimer.end(true);
+
+      // Update progress: Document organization complete
+      updateAnalysisProgress(analysisId.toString(), {
+        stage: 'document_preparation',
+        progress: 20,
+        currentStep: 'Creating document intelligence mappings...',
+        completedSteps: 2
+      });
 
       // Step 3: Get attribution mappings for source attribution
       const attributions = await this.intelligenceService.getAttributionMappings(organizedDocument.id!);
@@ -344,6 +372,17 @@ export class EvidenceAnalyzer {
 
       console.log(`📊 Analysis data: ${semanticChunks.length} semantic chunks + ${originalChunks.length} original chunks`);
 
+      // Update progress: Data preparation complete, starting analysis
+      updateAnalysisProgress(analysisId.toString(), {
+        stage: 'analysis_starting',
+        progress: 30,
+        currentStep: 'Starting AI-powered compliance analysis...',
+        completedSteps: 3,
+        documentsProcessed: targetDocumentIds.length,
+        semanticChunks: semanticChunks.length,
+        textChunks: originalChunks.length
+      });
+
       // Step 5: Process each control using hybrid approach
       let compliantCount = 0;
       let partialCount = 0;
@@ -351,7 +390,30 @@ export class EvidenceAnalyzer {
       let totalConfidence = 0;
       const controlTimers: Array<{ controlId: string; timer: any }> = [];
 
-      for (const control of controls) {
+      for (let i = 0; i < controls.length; i++) {
+        const control = controls[i];
+        
+        // Update progress: Processing current control
+        const currentProgress = 30 + ((i / controls.length) * 60);
+        updateAnalysisProgress(analysisId.toString(), {
+          stage: 'analysis_processing',
+          progress: Math.round(currentProgress),
+          currentStep: `Analyzing ${control.title || control.control_id}...`,
+          completedSteps: 3 + i,
+          currentControl: {
+            id: control.id,
+            title: control.title,
+            description: control.description || control.requirement_text,
+            index: i + 1,
+            total: controls.length
+          },
+          runningTotals: {
+            compliant: compliantCount,
+            partial: partialCount,
+            missing: missingCount
+          }
+        });
+        
         const controlTimer = PerformanceMonitor.startTimer(
           'control_analysis',
           'analyzeControlEvidence',
@@ -382,6 +444,26 @@ export class EvidenceAnalyzer {
           totalConfidence += mappingResult.confidenceScore;
           successfulControls++;
           
+          // Send interim result for immediate UI value
+          addInterimResult(analysisId.toString(), {
+            type: 'control_completed',
+            control: {
+              id: control.id,
+              title: control.title,
+              control_id: control.control_id,
+              status: mappingResult.status,
+              confidence: mappingResult.confidenceScore,
+              evidenceCount: (mappingResult as any).evidenceItems?.length || 0
+            },
+            summary: {
+              processed: i + 1,
+              remaining: controls.length - (i + 1),
+              compliant: compliantCount,
+              partial: partialCount,
+              missing: missingCount
+            }
+          });
+          
           controlTimer.addMetadata('status', mappingResult.status);
           controlTimer.addMetadata('confidenceScore', mappingResult.confidenceScore);
           await controlTimer.end(true);
@@ -391,6 +473,26 @@ export class EvidenceAnalyzer {
           
         } catch (error) {
           console.error(`Failed to process control ${control.id}:`, error);
+          missingCount++; // Count failed controls as missing
+          
+          // Send interim result for failed control
+          addInterimResult(analysisId.toString(), {
+            type: 'control_failed',
+            control: {
+              id: control.id,
+              title: control.title,
+              control_id: control.control_id,
+              error: error instanceof Error ? error.message : 'Unknown error'
+            },
+            summary: {
+              processed: i + 1,
+              remaining: controls.length - (i + 1),
+              compliant: compliantCount,
+              partial: partialCount,
+              missing: missingCount
+            }
+          });
+          
           controlTimer.addMetadata('status', 'failed');
           await controlTimer.end(false, error instanceof Error ? error.message : 'Control processing failed');
         }
@@ -398,6 +500,22 @@ export class EvidenceAnalyzer {
 
       const averageConfidence = controls.length > 0 ? totalConfidence / controls.length : 0;
       const processingTime = Date.now() - startTime;
+
+      // Update progress: Analysis complete, finalizing
+      updateAnalysisProgress(analysisId.toString(), {
+        stage: 'finalizing',
+        progress: 95,
+        currentStep: 'Finalizing analysis results...',
+        completedSteps: 3 + controls.length,
+        finalResults: {
+          totalControls: controls.length,
+          compliant: compliantCount,
+          partial: partialCount,
+          missing: missingCount,
+          averageConfidence: Math.round(averageConfidence),
+          processingTime: Math.round(processingTime / 1000)
+        }
+      });
 
       // Update analysis with results
       await sql`
@@ -411,6 +529,23 @@ export class EvidenceAnalyzer {
           processing_time = ${processingTime}
         WHERE id = ${analysisId}
       `;
+
+      // Final progress update: Analysis completed
+      updateAnalysisProgress(analysisId.toString(), {
+        stage: 'completed',
+        progress: 100,
+        currentStep: 'Analysis completed successfully!',
+        completedSteps: 3 + controls.length,
+        finalResults: {
+          totalControls: controls.length,
+          compliant: compliantCount,
+          partial: partialCount,
+          missing: missingCount,
+          averageConfidence: Math.round(averageConfidence),
+          processingTime: Math.round(processingTime / 1000)
+        },
+        completed: true
+      });
 
       // Record comprehensive analysis session metrics
       await PerformanceMonitor.recordAnalysisSession({

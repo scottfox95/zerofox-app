@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 interface ProcessingResult {
   totalChunks: number;
@@ -8,17 +8,110 @@ interface ProcessingResult {
   processingTime: number;
 }
 
+interface ProcessingProgress {
+  step: 'upload' | 'convert' | 'chunk' | 'embed' | 'complete' | 'error';
+  message: string;
+  progress: number; // 0-100
+  details?: string;
+}
+
 export default function DocumentsPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<string>('');
+  const [progress, setProgress] = useState<ProcessingProgress | null>(null);
+  const [currentDocumentId, setCurrentDocumentId] = useState<number | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // TODO: Add localStorage persistence later
+  // Check for ongoing processing on component mount
+  // useEffect(() => {
+  //   if (typeof window !== 'undefined' && !currentDocumentId) {
+  //     const savedDocId = localStorage.getItem('processingDocumentId');
+  //     if (savedDocId) {
+  //       const docId = parseInt(savedDocId);
+  //       setCurrentDocumentId(docId);
+  //       setIsUploading(true);
+  //       setIsPolling(true);
+  //     }
+  //   }
+  // }, []);
+  
+  // Save current document ID to localStorage
+  // useEffect(() => {
+  //   if (typeof window !== 'undefined') {
+  //     if (currentDocumentId) {
+  //       localStorage.setItem('processingDocumentId', currentDocumentId.toString());
+  //     } else {
+  //       localStorage.removeItem('processingDocumentId');
+  //     }
+  //   }
+  // }, [currentDocumentId]);
+
+  // Poll for processing progress
+  const pollProgress = async (documentId: number) => {
+    try {
+      const response = await fetch(`/api/admin/documents/progress?id=${documentId}`);
+      if (!response.ok) return;
+      
+      const data = await response.json();
+      if (data.progress) {
+        setProgress(data.progress);
+        
+        if (data.progress.step === 'complete') {
+          setIsPolling(false);
+          setIsUploading(false);
+          setProcessingStatus(
+            `✅ Document processed successfully! Created ${data.progress.details || 'text chunks'}. Check the "Processed Documents" page to view results.`
+          );
+          setCurrentDocumentId(null);
+          
+          // Clear file input
+          if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+          }
+        } else if (data.progress.step === 'error') {
+          setIsPolling(false);
+          setIsUploading(false);
+          setProcessingStatus(`❌ Error: ${data.progress.message}`);
+          setProgress(null);
+          setCurrentDocumentId(null);
+        }
+      }
+    } catch (error) {
+      console.error('Error polling progress:', error);
+    }
+  };
+
+  // Effect to handle polling
+  useEffect(() => {
+    if (isPolling && currentDocumentId) {
+      pollingRef.current = setInterval(() => {
+        pollProgress(currentDocumentId);
+      }, 2000); // Poll every 2 seconds
+    } else {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    }
+
+    // Cleanup on unmount
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+      }
+    };
+  }, [isPolling, currentDocumentId]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setIsUploading(true);
-    setProcessingStatus('Uploading document...');
+    setProcessingStatus('');
+    setProgress({ step: 'upload', message: 'Uploading document...', progress: 10 });
 
     try {
       // Step 1: Upload document metadata
@@ -36,37 +129,43 @@ export default function DocumentsPage() {
       }
 
       const uploadResult = await uploadResponse.json();
-      setProcessingStatus('Processing document...');
+      const documentId = uploadResult.document.id;
+      
+      setCurrentDocumentId(documentId);
+      setProgress({ step: 'convert', message: 'Converting document format...', progress: 30 });
 
       // Step 2: Process document content
       const processFormData = new FormData();
       processFormData.append('file', file);
-      processFormData.append('documentId', uploadResult.document.id.toString());
+      processFormData.append('documentId', documentId.toString());
       
-      const processResponse = await fetch('/api/admin/documents/process', {
+      // Start processing in background
+      fetch('/api/admin/documents/process', {
         method: 'POST',
         body: processFormData
+      }).then(async (processResponse) => {
+        if (!processResponse.ok) {
+          const error = await processResponse.json();
+          setProgress({ step: 'error', message: error.error || 'Processing failed', progress: 0 });
+          setIsUploading(false);
+          setProcessingStatus(`❌ Error: ${error.error || 'Processing failed'}`);
+          return;
+        }
+
+        // Processing started successfully, begin polling
+        setProgress({ step: 'chunk', message: 'Processing document content...', progress: 50 });
+      }).catch((error) => {
+        setProgress({ step: 'error', message: error.message, progress: 0 });
+        setIsUploading(false);
+        setProcessingStatus(`❌ Error: ${error.message}`);
       });
 
-      if (!processResponse.ok) {
-        const error = await processResponse.json();
-        throw new Error(error.error || 'Processing failed');
-      }
-
-      const processResult: ProcessingResult = await processResponse.json();
-      
-      setProcessingStatus(
-        `✅ Document processed successfully! Created ${processResult.totalChunks} chunks from ${processResult.totalCharacters} characters in ${processResult.processingTime}ms. Check the "Processed Documents" page to view results.`
-      );
-
-      // Clear file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      // Start polling for progress
+      setIsPolling(true);
 
     } catch (error) {
+      setProgress({ step: 'error', message: error instanceof Error ? error.message : 'Unknown error', progress: 0 });
       setProcessingStatus(`❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
       setIsUploading(false);
     }
   };
@@ -110,11 +209,76 @@ export default function DocumentsPage() {
                     : 'bg-aravo-gradient text-white hover:opacity-90'
                 }`}
               >
-                {isUploading ? '⏳ Processing...' : '📁 Choose File'}
+                {isUploading ? (
+                progress ? `⏳ ${progress.message}` : '⏳ Processing...'
+              ) : '📁 Choose File'}
               </label>
             </div>
 
-            {processingStatus && (
+            {/* Progress Indicator */}
+            {progress && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-gray-700">{progress.message}</span>
+                  <span className="text-gray-500">{progress.progress}%</span>
+                </div>
+                
+                <div className="w-full bg-gray-200 rounded-full h-2.5">
+                  <div 
+                    className="bg-aravo-gradient h-2.5 rounded-full transition-all duration-500 ease-out"
+                    style={{ width: `${progress.progress}%` }}
+                  ></div>
+                </div>
+                
+                <div className="flex items-center space-x-2 text-xs text-gray-600">
+                  {progress.step === 'upload' && (
+                    <>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                      <span>Uploading file to server...</span>
+                    </>
+                  )}
+                  {progress.step === 'convert' && (
+                    <>
+                      <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+                      <span>Converting document format...</span>
+                    </>
+                  )}
+                  {progress.step === 'chunk' && (
+                    <>
+                      <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse"></div>
+                      <span>Breaking document into chunks...</span>
+                    </>
+                  )}
+                  {progress.step === 'embed' && (
+                    <>
+                      <div className="w-2 h-2 bg-purple-500 rounded-full animate-pulse"></div>
+                      <span>Generating semantic embeddings...</span>
+                    </>
+                  )}
+                  {progress.step === 'complete' && (
+                    <>
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <span>Processing complete!</span>
+                    </>
+                  )}
+                  {progress.step === 'error' && (
+                    <>
+                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                      <span>Error occurred during processing</span>
+                    </>
+                  )}
+                </div>
+                
+                {progress.details && (
+                  <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">
+                    {progress.details}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Final Status Message */}
+            {processingStatus && !progress && (
               <div className={`p-3 rounded-lg text-sm ${
                 processingStatus.includes('❌') 
                   ? 'bg-red-50 text-red-700 border border-red-200'
@@ -133,7 +297,38 @@ export default function DocumentsPage() {
       <div className="bg-white rounded-lg shadow-md p-6">
         <h2 className="text-xl font-semibold text-gray-800 mb-4">Upload Status</h2>
         
-        {processingStatus && (
+        {/* Current Processing Status */}
+        {progress && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <div className="flex items-center space-x-3">
+              <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+              <div className="flex-1">
+                <div className="text-sm font-medium text-blue-800">{progress.message}</div>
+                {progress.details && (
+                  <div className="text-xs text-blue-600 mt-1">{progress.details}</div>
+                )}
+                <div className="mt-2">
+                  <div className="flex items-center justify-between text-xs text-blue-600 mb-1">
+                    <span>Progress</span>
+                    <span>{progress.progress}%</span>
+                  </div>
+                  <div className="w-full bg-blue-200 rounded-full h-1.5">
+                    <div 
+                      className="bg-blue-600 h-1.5 rounded-full transition-all duration-500 ease-out"
+                      style={{ width: `${progress.progress}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="mt-3 text-xs text-blue-600">
+              ℹ️ Processing can take 1-2 minutes for large documents. You can safely navigate to other pages - processing will continue in the background.
+            </div>
+          </div>
+        )}
+        
+        {/* Final Status */}
+        {processingStatus && !progress && (
           <div className={`p-4 rounded-lg text-sm mb-4 ${
             processingStatus.includes('❌') 
               ? 'bg-red-50 text-red-700 border border-red-200'

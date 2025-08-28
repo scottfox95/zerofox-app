@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     const deleteResult = await sql`
       DELETE FROM semantic_chunks WHERE document_id = ${documentId}
     `;
-    console.log(`🧹 Deleted ${deleteResult.count || 0} existing semantic chunks`);
+    console.log(`🧹 Deleted ${(deleteResult as any).count || 0} existing semantic chunks`);
 
     // Create semantic chunks
     console.log('🧠 Creating semantic chunks...');

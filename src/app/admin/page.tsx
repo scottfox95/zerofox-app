@@ -1,14 +1,45 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+
+interface User {
+  userId: number;
+  email: string;
+  role: 'admin' | 'client' | 'demo';
+}
 
 export default function AdminDashboard() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [dbStatus, setDbStatus] = useState<'unknown' | 'connected' | 'error'>('unknown');
   const [dbInitialized, setDbInitialized] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [message, setMessage] = useState('');
   const [adminCreated, setAdminCreated] = useState(false);
   const [isCreatingAdmin, setIsCreatingAdmin] = useState(false);
+  const router = useRouter();
+
+  useEffect(() => {
+    // Get user info from token
+    const token = document.cookie
+      .split('; ')
+      .find(row => row.startsWith('token='))
+      ?.split('=')[1];
+
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        setUser(payload);
+      } catch (error) {
+        console.error('Failed to parse token:', error);
+        router.push('/login');
+      }
+    } else {
+      router.push('/login');
+    }
+    setIsLoading(false);
+  }, [router]);
 
   const testConnection = async () => {
     try {
@@ -80,92 +111,135 @@ export default function AdminDashboard() {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="space-y-8">
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h2 className="text-2xl font-semibold text-gray-800 mb-4">Loading...</h2>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null; // Will redirect to login
+  }
+
+  const isAdmin = user.role === 'admin';
+  const isDemo = user.role === 'demo';
+
   return (
     <div className="space-y-8">
       <div className="bg-white rounded-lg shadow-md p-6">
-        <h2 className="text-2xl font-semibold text-gray-800 mb-4">Admin Dashboard</h2>
-        <p className="text-gray-600 mb-6">Welcome to the ZeroFox Compliance admin panel.</p>
+        <h2 className="text-2xl font-semibold text-gray-800 mb-4">
+          {isDemo ? 'Demo Dashboard' : isAdmin ? 'Admin Dashboard' : 'Dashboard'}
+        </h2>
+        <p className="text-gray-600 mb-6">
+          Welcome to {isDemo ? 'the ZeroFox Compliance demo' : 'ZeroFox Compliance'}{isAdmin ? ' admin panel' : ''}.
+        </p>
         
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-          <h3 className="text-lg font-semibold text-blue-800 mb-2">🔧 Database Setup</h3>
-          <div className="text-blue-700 text-sm space-y-2 mb-4">
-            <p><strong>Status:</strong> Initialize your NeonDB connection and tables</p>
-            <p><strong>Required:</strong> All essential tables for compliance management</p>
-          </div>
-          
-          {message && (
-            <div className={`p-3 rounded-lg mb-4 ${
-              dbStatus === 'connected' || dbInitialized
-                ? 'bg-green-50 border border-green-200 text-green-700' 
-                : 'bg-red-50 border border-red-200 text-red-700'
-            }`}>
-              {message}
+        {/* Database Setup - Admin Only */}
+        {isAdmin && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <h3 className="text-lg font-semibold text-blue-800 mb-2">🔧 Database Setup</h3>
+            <div className="text-blue-700 text-sm space-y-2 mb-4">
+              <p><strong>Status:</strong> Initialize your NeonDB connection and tables</p>
+              <p><strong>Required:</strong> All essential tables for compliance management</p>
             </div>
-          )}
-          
-          <div className="flex gap-3">
-            <button
-              onClick={testConnection}
-              className="bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-700 transition-colors"
-            >
-              Test Connection
-            </button>
             
-            <button
-              onClick={initializeDatabase}
-              disabled={isInitializing || dbInitialized}
-              className="bg-aravo-gradient text-white px-4 py-2 rounded-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isInitializing ? 'Initializing...' : dbInitialized ? 'Database Ready' : 'Initialize Database'}
-            </button>
+            {message && (
+              <div className={`p-3 rounded-lg mb-4 ${
+                dbStatus === 'connected' || dbInitialized
+                  ? 'bg-green-50 border border-green-200 text-green-700' 
+                  : 'bg-red-50 border border-red-200 text-red-700'
+              }`}>
+                {message}
+              </div>
+            )}
             
-            <button
-              onClick={createAdmin}
-              disabled={isCreatingAdmin || adminCreated || !dbInitialized}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isCreatingAdmin ? 'Creating Admin...' : adminCreated ? 'Admin Created' : 'Create Admin User'}
-            </button>
+            <div className="flex gap-3">
+              <button
+                onClick={testConnection}
+                className="bg-gray-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-700 transition-colors"
+              >
+                Test Connection
+              </button>
+              
+              <button
+                onClick={initializeDatabase}
+                disabled={isInitializing || dbInitialized}
+                className="bg-aravo-gradient text-white px-4 py-2 rounded-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isInitializing ? 'Initializing...' : dbInitialized ? 'Database Ready' : 'Initialize Database'}
+              </button>
+              
+              <button
+                onClick={createAdmin}
+                disabled={isCreatingAdmin || adminCreated || !dbInitialized}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isCreatingAdmin ? 'Creating Admin...' : adminCreated ? 'Admin Created' : 'Create Admin User'}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-2">AI Models</h3>
-          <p className="text-gray-600 text-sm mb-4">Manage AI model configurations</p>
-          <div className="mt-4">
-            <a
-              href="/admin/ai-models"
-              className="inline-flex items-center px-3 py-2 bg-aravo-gradient text-white text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity"
-            >
-              Configure Models
-            </a>
-          </div>
-        </div>
+        {/* Admin-only sections */}
+        {isAdmin && (
+          <>
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">AI Models</h3>
+              <p className="text-gray-600 text-sm mb-4">Manage AI model configurations</p>
+              <div className="mt-4">
+                <a
+                  href="/admin/ai-models"
+                  className="inline-flex items-center px-3 py-2 bg-aravo-gradient text-white text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity"
+                >
+                  Configure Models
+                </a>
+              </div>
+            </div>
+            
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">System Prompts</h3>
+              <p className="text-gray-600 text-sm mb-4">Configure and optimize AI analysis prompts</p>
+              <div className="mt-4">
+                <a
+                  href="/admin/prompts"
+                  className="inline-flex items-center px-3 py-2 bg-orange-600 text-white text-sm font-semibold rounded-lg hover:bg-orange-700 transition-colors"
+                >
+                  🤖 Manage Prompts
+                </a>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">User Management</h3>
+              <p className="text-gray-600 text-sm mb-4">Manage user accounts and organizations</p>
+              <div className="mt-4">
+                <a
+                  href="/admin/users"
+                  className="inline-flex items-center px-3 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors"
+                >
+                  👥 Manage Users
+                </a>
+              </div>
+            </div>
+          </>
+        )}
         
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-2">System Prompts</h3>
-          <p className="text-gray-600 text-sm mb-4">Configure and optimize AI analysis prompts</p>
-          <div className="mt-4">
-            <a
-              href="/admin/prompts"
-              className="inline-flex items-center px-3 py-2 bg-orange-600 text-white text-sm font-semibold rounded-lg hover:bg-orange-700 transition-colors"
-            >
-              🤖 Manage Prompts
-            </a>
-          </div>
-        </div>
-        
+        {/* Available to all authenticated users */}
         <div className="bg-white rounded-lg shadow-md p-6">
           <h3 className="text-lg font-semibold text-gray-800 mb-2">Frameworks</h3>
-          <p className="text-gray-600 text-sm mb-4">Standardize compliance frameworks</p>
+          <p className="text-gray-600 text-sm mb-4">{isAdmin ? 'Manage' : 'View'} compliance frameworks</p>
           <div className="mt-4">
             <a
               href="/admin/frameworks"
               className="inline-flex items-center px-3 py-2 bg-aravo-gradient text-white text-sm font-semibold rounded-lg hover:opacity-90 transition-opacity"
             >
-              Manage Frameworks
+              {isAdmin ? 'Manage' : 'View'} Frameworks
             </a>
           </div>
         </div>
@@ -184,8 +258,8 @@ export default function AdminDashboard() {
         </div>
         
         <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-2">Processed Documents</h3>
-          <p className="text-gray-600 text-sm mb-4">View and manage processed documents</p>
+          <h3 className="text-lg font-semibold text-gray-800 mb-2">My Documents</h3>
+          <p className="text-gray-600 text-sm mb-4">View and manage your processed documents</p>
           <div className="mt-4">
             <a
               href="/admin/processed-documents"
@@ -208,36 +282,55 @@ export default function AdminDashboard() {
             </a>
           </div>
         </div>
-        
+
+        {/* Admin-only sections continued */}
+        {isAdmin && (
+          <>
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">System Status</h3>
+              <p className="text-gray-600 text-sm mb-4">Monitor system health</p>
+              <div className="text-xs text-gray-500">
+                <div className="flex items-center space-x-2">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  <span>App: Running</span>
+                </div>
+                <div className="flex items-center space-x-2 mt-1">
+                  <div className={`w-3 h-3 rounded-full ${
+                    dbStatus === 'connected' ? 'bg-green-500' : 
+                    dbStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
+                  }`}></div>
+                  <span>Database: {
+                    dbStatus === 'connected' ? 'Connected' : 
+                    dbStatus === 'error' ? 'Error' : 'Unknown'
+                  }</span>
+                </div>
+                <div className="flex items-center space-x-2 mt-1">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  <span>Auth: Enabled</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg shadow-md p-6">
+              <h3 className="text-lg font-semibold text-gray-800 mb-2">Performance</h3>
+              <p className="text-gray-600 text-sm mb-4">View system performance metrics</p>
+              <div className="mt-4">
+                <a
+                  href="/admin/performance"
+                  className="inline-flex items-center px-3 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  📊 View Performance
+                </a>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Coming Soon sections for all users */}
         <div className="bg-white rounded-lg shadow-md p-6">
           <h3 className="text-lg font-semibold text-gray-800 mb-2">Custom Frameworks</h3>
           <p className="text-gray-600 text-sm mb-4">Build custom compliance frameworks</p>
-          <div className="text-xs text-gray-500">Ready for Task 5</div>
-        </div>
-        
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h3 className="text-lg font-semibold text-gray-800 mb-2">System Status</h3>
-          <p className="text-gray-600 text-sm mb-4">Monitor system health</p>
-          <div className="text-xs text-gray-500">
-            <div className="flex items-center space-x-2">
-              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-              <span>App: Running</span>
-            </div>
-            <div className="flex items-center space-x-2 mt-1">
-              <div className={`w-3 h-3 rounded-full ${
-                dbStatus === 'connected' ? 'bg-green-500' : 
-                dbStatus === 'error' ? 'bg-red-500' : 'bg-gray-400'
-              }`}></div>
-              <span>Database: {
-                dbStatus === 'connected' ? 'Connected' : 
-                dbStatus === 'error' ? 'Error' : 'Unknown'
-              }</span>
-            </div>
-            <div className="flex items-center space-x-2 mt-1">
-              <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-              <span>Auth: Enabled</span>
-            </div>
-          </div>
+          <div className="text-xs text-gray-500">Coming Soon</div>
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import ConsoleViewer from '@/components/ConsoleViewer';
 
 interface Analysis {
@@ -40,6 +41,7 @@ interface AIModel {
 }
 
 export default function AnalysesPage() {
+  const router = useRouter();
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -119,11 +121,9 @@ export default function AnalysesPage() {
 
       const data = await response.json();
       if (data.success) {
-        alert('Analysis started successfully!');
+        // Redirect to the analysis progress page
         setShowCreateModal(false);
-        setSelectedFramework(null);
-        setSelectedDocuments([]);
-        fetchData();
+        router.push(`/admin/analyses/${data.analysisId}/progress`);
       } else {
         alert(`Failed to start analysis: ${data.error}`);
       }
