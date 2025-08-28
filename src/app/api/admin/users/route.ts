@@ -158,15 +158,15 @@ export async function POST(request: NextRequest) {
       } catch (error) {
         console.error('Failed to create organization:', error);
         console.error('Error details:', {
-          message: error?.message || 'No error message',
-          code: error?.code || 'No error code',
-          constraint: error?.constraint || 'No constraint',
-          detail: error?.detail || 'No detail',
-          stack: error?.stack || 'No stack trace'
+          message: error instanceof Error ? error.message : 'No error message',
+          code: (error as any)?.code || 'No error code',
+          constraint: (error as any)?.constraint || 'No constraint',
+          detail: (error as any)?.detail || 'No detail',
+          stack: error instanceof Error ? error.stack : 'No stack trace'
         });
         
         return NextResponse.json(
-          { error: `Failed to create organization: ${error?.message || 'Unknown database error'}` },
+          { error: `Failed to create organization: ${error instanceof Error ? error.message : 'Unknown database error'}` },
           { status: 500 }
         );
       }

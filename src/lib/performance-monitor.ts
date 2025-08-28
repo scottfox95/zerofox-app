@@ -68,6 +68,10 @@ class PerformanceTimer {
     this.metadata[key] = value;
   }
 
+  get duration(): number {
+    return Date.now() - this.startTime;
+  }
+
   async end(success: boolean = true, errorMessage?: string): Promise<PerformanceMetric> {
     const endTime = Date.now();
     const duration = endTime - this.startTime;

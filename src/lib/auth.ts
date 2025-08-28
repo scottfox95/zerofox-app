@@ -67,10 +67,10 @@ export const createUser = async (
   } catch (error) {
     secureLog.error('Create user error:', error);
     secureLog.error('Error details:', {
-      message: error?.message || 'No error message',
-      code: error?.code || 'No error code',
-      constraint: error?.constraint || 'No constraint',
-      detail: error?.detail || 'No detail'
+      message: error instanceof Error ? error.message : 'No error message',
+      code: (error as any)?.code || 'No error code',
+      constraint: (error as any)?.constraint || 'No constraint',
+      detail: (error as any)?.detail || 'No detail'
     });
     return null;
   }

@@ -260,7 +260,7 @@ class AIService {
       
       if (result.success && result.response) {
         consoleLogger.aiCall(modelId, 'Response received', result.response.substring(0, 200) + '...', undefined);
-        consoleLogger.info(`AI call completed in ${timer['duration'] || 0}ms`, 'AI', { 
+        consoleLogger.info(`AI call completed in ${timer.duration || 0}ms`, 'AI', { 
           model: modelId,
           tokens: result.usage?.total_tokens || 0
         });

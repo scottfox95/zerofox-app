@@ -189,7 +189,7 @@ export default function MarkdownViewer({
       parts.push(
         <span
           key={`highlight-${index}`}
-          ref={el => highlightRefs.current[index] = el}
+          ref={el => { highlightRefs.current[index] = el; }}
           className={`${
             isCurrentMatch 
               ? 'bg-yellow-300 text-black ring-2 ring-yellow-500' 

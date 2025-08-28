@@ -65,7 +65,7 @@ export async function POST() {
   } catch (error) {
     console.error('❌ Error fixing constraints:', error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: error instanceof Error ? error.message : 'Unknown error occurred' },
       { status: 500 }
     );
   }
