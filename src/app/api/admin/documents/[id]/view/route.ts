@@ -23,7 +23,7 @@ export async function GET(
 
     // Get document details including file content from database
     const documentResult = await sql`
-      SELECT id, filename, original_name, file_type, file_content, file_size, organization_id
+      SELECT id, filename, original_name, file_type, file_content, file_size, upload_path, organization_id
       FROM documents 
       WHERE id = ${documentId}
       LIMIT 1
@@ -44,18 +44,33 @@ export async function GET(
     // TODO: Add proper auth check here when user sessions are implemented
     // For now, we'll serve the document if it exists
 
-    if (!document.file_content) {
-      console.error('❌ Document file content is null:', document.original_name);
+    let fileBuffer: Buffer;
+
+    if (document.file_content) {
+      // New method: file stored in database
+      console.log('✅ File content found in database, serving document');
+      fileBuffer = document.file_content;
+    } else if (document.upload_path) {
+      // Legacy method: file stored on filesystem
+      try {
+        console.log('📄 File stored on filesystem, reading from:', document.upload_path);
+        const { readFile } = await import('fs/promises');
+        fileBuffer = await readFile(document.upload_path);
+        console.log('✅ File read from filesystem successfully');
+      } catch (error) {
+        console.error('❌ Failed to read file from filesystem:', error);
+        return NextResponse.json(
+          { success: false, error: 'File not found on filesystem' },
+          { status: 404 }
+        );
+      }
+    } else {
+      console.error('❌ Document has no file content or upload path:', document.original_name);
       return NextResponse.json(
         { success: false, error: 'Document content not found' },
         { status: 404 }
       );
     }
-
-    console.log('✅ File content found, serving document');
-
-    // Use the file content from database
-    const fileBuffer = document.file_content;
     
     // Determine content type
     const contentType = getContentType(document.file_type);

@@ -149,16 +149,29 @@ export class DocumentProcessor {
         return { success: false, error: 'Document not found' };
       }
 
-      const document = documentResult[0] as DocumentUpload & { file_content?: Buffer };
+      const document = documentResult[0] as DocumentUpload & { file_content?: Buffer; upload_path?: string };
 
-      if (!document.file_content) {
-        return { success: false, error: 'Document file content not found' };
+      let fileFromDb: File;
+
+      if (document.file_content) {
+        // New method: file stored in database
+        fileFromDb = new File([new Uint8Array(document.file_content)], document.originalName || document.filename, {
+          type: document.fileType
+        });
+      } else if (document.upload_path) {
+        // Legacy method: file stored on filesystem
+        try {
+          const { readFile } = await import('fs/promises');
+          const fileBuffer = await readFile(document.upload_path);
+          fileFromDb = new File([fileBuffer], document.originalName || document.filename, {
+            type: document.fileType
+          });
+        } catch (error) {
+          return { success: false, error: `Failed to read file from ${document.upload_path}: ${error}` };
+        }
+      } else {
+        return { success: false, error: 'Document file content not found (no file_content or upload_path)' };
       }
-
-      // Create a File object from the stored buffer
-      const fileFromDb = new File([new Uint8Array(document.file_content)], document.originalName || document.filename, {
-        type: document.fileType
-      });
 
       // Extract text based on file type
       const extractedText = await this.extractText(fileFromDb, document.fileType, document.originalName);
