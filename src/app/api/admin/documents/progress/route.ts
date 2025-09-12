@@ -44,35 +44,64 @@ export async function GET(request: NextRequest) {
     // Determine progress based on document state
     let progress;
     
-    if (doc.semantic_chunks_count > 0) {
+    // Convert to numbers for reliable comparison
+    const textChunks = parseInt(doc.text_chunks_count) || 0;
+    const semanticChunks = parseInt(doc.semantic_chunks_count) || 0;
+    
+    if (semanticChunks > 0) {
       // Document is fully processed - has semantic chunks
       progress = {
         step: 'complete',
         message: 'Document processed successfully',
         progress: 100,
-        details: `Created ${doc.text_chunks_count} text chunks and ${doc.semantic_chunks_count} semantic chunks`
+        details: `Created ${textChunks} text chunks and ${semanticChunks} semantic chunks`
       };
-    } else if (doc.text_chunks_count > 0) {
+    } else if (textChunks > 0) {
       // Document is being processed - has text chunks but no semantic chunks yet
-      const estimatedProgress = Math.max(0, Math.min(90, 70 + Math.floor(doc.text_chunks_count * 0.1)));
-      progress = {
-        step: 'embed',
-        message: 'Generating semantic embeddings...',
-        progress: estimatedProgress,
-        details: `Processing ${doc.text_chunks_count} text chunks`
-      };
-    } else {
-      // Just uploaded, conversion in progress - use faster time-based estimate
-      const timeSinceUpload = Date.now() - new Date(doc.created_at).getTime();
-      const timeBasedProgress = Math.max(0, Math.min(25, timeSinceUpload / 2000)); // Faster progression
-      const estimatedProgress = Math.max(50, Math.min(80, 50 + timeBasedProgress));
       
-      progress = {
-        step: 'chunk',
-        message: 'Breaking document into chunks...',
-        progress: Math.round(estimatedProgress),
-        details: `Converting ${doc.filename}`
-      };
+      // Check if processing is actually complete (backup detection)
+      if (doc.processed_at && textChunks > 0) {
+        // Has processed_at timestamp and text chunks - likely complete but semantic count is wrong
+        progress = {
+          step: 'complete',
+          message: 'Document processed successfully',
+          progress: 100,
+          details: `Created ${textChunks} text chunks${semanticChunks > 0 ? ` and ${semanticChunks} semantic chunks` : ''}`
+        };
+      } else {
+        // Still processing
+        const estimatedProgress = Math.max(0, Math.min(90, 70 + Math.floor(textChunks * 0.1)));
+        progress = {
+          step: 'embed',
+          message: 'Generating semantic embeddings...',
+          progress: estimatedProgress,
+          details: `Processing ${textChunks} text chunks`
+        };
+      }
+    } else {
+      // Just uploaded, conversion in progress
+      const timeSinceUpload = Date.now() - new Date(doc.created_at).getTime();
+      
+      // If document has been processing for more than 5 minutes with processed_at, assume complete
+      if (doc.processed_at && timeSinceUpload > 300000) { // 5 minutes
+        progress = {
+          step: 'complete',
+          message: 'Document processing completed',
+          progress: 100,
+          details: `Document processed successfully`
+        };
+      } else {
+        // Still processing - use time-based estimate
+        const timeBasedProgress = Math.max(0, Math.min(25, timeSinceUpload / 2000)); // Faster progression
+        const estimatedProgress = Math.max(50, Math.min(80, 50 + timeBasedProgress));
+        
+        progress = {
+          step: 'chunk',
+          message: 'Breaking document into chunks...',
+          progress: Math.round(estimatedProgress),
+          details: `Converting ${doc.filename}`
+        };
+      }
     }
 
     return NextResponse.json({
