@@ -19,10 +19,7 @@ export default function DocumentsPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [progress, setProgress] = useState<ProcessingProgress | null>(null);
-  const [currentDocumentId, setCurrentDocumentId] = useState<number | null>(null);
-  const [isPolling, setIsPolling] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const pollingRef = useRef<NodeJS.Timeout | null>(null);
   
   // TODO: Add localStorage persistence later
   // Check for ongoing processing on component mount
@@ -49,66 +46,6 @@ export default function DocumentsPage() {
   //   }
   // }, [currentDocumentId]);
 
-  // Poll for processing progress
-  const pollProgress = async (documentId: number) => {
-    try {
-      const response = await fetch(`/api/admin/documents/progress?id=${documentId}`);
-      if (!response.ok) return;
-      
-      const data = await response.json();
-      if (data.progress) {
-        // Ensure progress percentage is valid (0-100)
-        const sanitizedProgress = {
-          ...data.progress,
-          progress: Math.max(0, Math.min(100, data.progress.progress || 0))
-        };
-        setProgress(sanitizedProgress);
-        
-        if (data.progress.step === 'complete') {
-          setIsPolling(false);
-          setIsUploading(false);
-          setProcessingStatus(
-            `✅ Document processed successfully! Created ${data.progress.details || 'text chunks'}. Check the "Processed Documents" page to view results.`
-          );
-          setCurrentDocumentId(null);
-          
-          // Clear file input
-          if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-          }
-        } else if (data.progress.step === 'error') {
-          setIsPolling(false);
-          setIsUploading(false);
-          setProcessingStatus(`❌ Error: ${data.progress.message}`);
-          setProgress(null);
-          setCurrentDocumentId(null);
-        }
-      }
-    } catch (error) {
-      console.error('Error polling progress:', error);
-    }
-  };
-
-  // Effect to handle polling
-  useEffect(() => {
-    if (isPolling && currentDocumentId) {
-      pollingRef.current = setInterval(() => {
-        pollProgress(currentDocumentId);
-      }, 1000); // Poll every 1 second for faster updates
-    } else {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
-    }
-
-    // Cleanup on unmount
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
-    };
-  }, [isPolling, currentDocumentId]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -137,10 +74,8 @@ export default function DocumentsPage() {
 
       const uploadResult = await uploadResponse.json();
       const documentId = uploadResult.document.id;
-      
-      setCurrentDocumentId(documentId);
-      // Step 2: Start processing document content (no file needed - it's in database)
-      setProgress({ step: 'convert', message: 'Starting document processing...', progress: 75 });
+      // Step 2: Start processing document content
+      setProgress({ step: 'convert', message: 'Processing document in background...', progress: 90 });
       
       // Start processing in background
       fetch('/api/admin/documents/process', {
@@ -158,17 +93,21 @@ export default function DocumentsPage() {
           return;
         }
 
-        // Processing started successfully, continue polling
-        setProgress({ step: 'chunk', message: 'Breaking document into chunks...', progress: 80 });
+        // Processing started successfully - show completion
+        setProgress({ step: 'complete', message: 'Upload complete! Document is processing...', progress: 100 });
+        setIsUploading(false);
+        setProcessingStatus(`✅ Document uploaded successfully! Processing will continue in the background. Check "Processed Documents" to view results when ready.`);
+        
+        // Clear file input
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
       }).catch((error) => {
         console.error('Processing error:', error);
         setProgress({ step: 'error', message: error.message, progress: 0 });
         setIsUploading(false);
         setProcessingStatus(`❌ Error: ${error.message}`);
       });
-
-      // Start polling for progress
-      setIsPolling(true);
 
     } catch (error) {
       setProgress({ step: 'error', message: error instanceof Error ? error.message : 'Unknown error', progress: 0 });
