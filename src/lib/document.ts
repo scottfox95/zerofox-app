@@ -156,7 +156,7 @@ export class DocumentProcessor {
       }
 
       // Create a File object from the stored buffer
-      const fileFromDb = new File([document.file_content], document.originalName || document.filename, {
+      const fileFromDb = new File([new Uint8Array(document.file_content)], document.originalName || document.filename, {
         type: document.fileType
       });
 
