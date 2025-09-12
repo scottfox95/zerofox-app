@@ -163,7 +163,7 @@ export class DocumentProcessor {
         try {
           const { readFile } = await import('fs/promises');
           const fileBuffer = await readFile(document.upload_path);
-          fileFromDb = new File([fileBuffer], document.originalName || document.filename, {
+          fileFromDb = new File([new Uint8Array(fileBuffer)], document.originalName || document.filename, {
             type: document.fileType
           });
         } catch (error) {
