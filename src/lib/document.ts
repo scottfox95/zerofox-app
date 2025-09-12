@@ -8,7 +8,6 @@ export interface DocumentUpload {
   originalName: string;
   fileType: string;
   fileSize: number;
-  uploadPath?: string;
   markdownPath?: string;
   markdownContent?: string;
   processedAt?: Date;
@@ -113,27 +112,14 @@ export class DocumentProcessor {
       const extension = this.getFileExtension(file.name);
       const filename = `doc_${timestamp}_${Math.random().toString(36).substr(2, 9)}.${extension}`;
       
-      // Create uploads directory if it doesn't exist
-      const { mkdir, writeFile } = await import('fs/promises');
-      const { join, dirname } = await import('path');
-      const uploadsDir = join(process.cwd(), 'uploads');
-      
-      try {
-        await mkdir(uploadsDir, { recursive: true });
-      } catch (err) {
-        // Directory might already exist
-      }
-
-      // Save file to disk
-      const uploadPath = join(uploadsDir, filename);
+      // Convert file to buffer for database storage
       const buffer = Buffer.from(await file.arrayBuffer());
-      await writeFile(uploadPath, buffer);
 
-      // Save document record to database with upload path
+      // Save document record to database with file content
       const documentResult = await sql`
-        INSERT INTO documents (organization_id, filename, original_name, file_type, file_size, upload_path)
-        VALUES (${organizationId}, ${filename}, ${file.name}, ${file.type}, ${file.size}, ${uploadPath})
-        RETURNING *
+        INSERT INTO documents (organization_id, filename, original_name, file_type, file_size, file_content)
+        VALUES (${organizationId}, ${filename}, ${file.name}, ${file.type}, ${file.size}, ${buffer})
+        RETURNING id, organization_id, filename, original_name, file_type, file_size, created_at
       `;
 
       const document = documentResult[0] as DocumentUpload;
@@ -149,12 +135,12 @@ export class DocumentProcessor {
 
   async processDocument(
     documentId: number, 
-    file: File
+    file?: File // Make file optional since we'll get it from database
   ): Promise<{ success: boolean; result?: ProcessedDocument; error?: string }> {
     try {
       const startTime = Date.now();
 
-      // Get document details
+      // Get document details including file content
       const documentResult = await sql`
         SELECT * FROM documents WHERE id = ${documentId}
       `;
@@ -163,10 +149,19 @@ export class DocumentProcessor {
         return { success: false, error: 'Document not found' };
       }
 
-      const document = documentResult[0] as DocumentUpload;
+      const document = documentResult[0] as DocumentUpload & { file_content?: Buffer };
+
+      if (!document.file_content) {
+        return { success: false, error: 'Document file content not found' };
+      }
+
+      // Create a File object from the stored buffer
+      const fileFromDb = new File([document.file_content], document.originalName || document.filename, {
+        type: document.fileType
+      });
 
       // Extract text based on file type
-      const extractedText = await this.extractText(file, document.fileType, document.originalName);
+      const extractedText = await this.extractText(fileFromDb, document.fileType, document.originalName);
       if (!extractedText.success) {
         return { success: false, error: extractedText.error };
       }
@@ -179,7 +174,7 @@ export class DocumentProcessor {
       `;
 
       // Classify the document
-      const classification = await this.intelligenceService.classifyDocument(file, extractedText.text!);
+      const classification = await this.intelligenceService.classifyDocument(fileFromDb, extractedText.text!);
       
       // Save classification to database
       await sql`

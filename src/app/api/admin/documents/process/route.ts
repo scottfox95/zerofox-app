@@ -7,21 +7,20 @@ export async function POST(request: NextRequest) {
   console.log('📄 Starting document processing...');
   
   try {
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-    const documentId = formData.get('documentId') as string;
+    const body = await request.json();
+    const documentId = body.documentId;
 
-    console.log(`📄 Processing file: ${file?.name} (${file?.size} bytes) for document ID: ${documentId}`);
+    console.log(`📄 Processing document ID: ${documentId}`);
 
-    if (!documentId || !file) {
+    if (!documentId) {
       return NextResponse.json(
-        { error: 'Document ID and file are required' },
+        { error: 'Document ID is required' },
         { status: 400 }
       );
     }
 
     console.log('📄 Calling document processor...');
-    const result = await documentProcessor.processDocument(parseInt(documentId), file);
+    const result = await documentProcessor.processDocument(parseInt(documentId));
     
     console.log(`📄 Processing result: ${result.success ? 'SUCCESS' : 'FAILED'}`);
     if (!result.success) {

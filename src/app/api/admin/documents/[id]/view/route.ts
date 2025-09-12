@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
-import { readFile } from 'fs/promises';
-import { existsSync } from 'fs';
-import path from 'path';
 
 interface Params {
   id: string;
@@ -24,9 +21,9 @@ export async function GET(
       );
     }
 
-    // Get document details from database - force fresh read
+    // Get document details including file content from database
     const documentResult = await sql`
-      SELECT id, filename, original_name, file_type, upload_path, organization_id
+      SELECT id, filename, original_name, file_type, file_content, file_size, organization_id
       FROM documents 
       WHERE id = ${documentId}
       LIMIT 1
@@ -40,37 +37,25 @@ export async function GET(
       );
     }
 
-    const document = documentResult[0];
-    console.log('📄 Full document object:', JSON.stringify(document, null, 2));
+    const document = documentResult[0] as any;
+    console.log('📄 Document found:', document.original_name);
 
     // Security: Check if user has access to this organization's documents
     // TODO: Add proper auth check here when user sessions are implemented
     // For now, we'll serve the document if it exists
 
-    if (!document.upload_path) {
-      console.error('❌ Document upload path is null:', document.original_name);
+    if (!document.file_content) {
+      console.error('❌ Document file content is null:', document.original_name);
       return NextResponse.json(
-        { success: false, error: 'Document path not found' },
+        { success: false, error: 'Document content not found' },
         { status: 404 }
       );
     }
 
-    // Construct full file path
-    const filePath = path.resolve(document.upload_path);
-    
-    // Security check: Ensure the file exists and is within allowed directories
-    if (!existsSync(filePath)) {
-      console.error('❌ File does not exist on disk:', filePath);
-      return NextResponse.json(
-        { success: false, error: 'Document file not found on disk' },
-        { status: 404 }
-      );
-    }
+    console.log('✅ File content found, serving document');
 
-    console.log('✅ File exists, serving document:', filePath);
-
-    // Read the file
-    const fileBuffer = await readFile(filePath);
+    // Use the file content from database
+    const fileBuffer = document.file_content;
     
     // Determine content type
     const contentType = getContentType(document.file_type);
