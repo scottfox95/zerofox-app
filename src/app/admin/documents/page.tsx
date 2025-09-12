@@ -89,7 +89,7 @@ export default function DocumentsPage() {
     if (isPolling && currentDocumentId) {
       pollingRef.current = setInterval(() => {
         pollProgress(currentDocumentId);
-      }, 2000); // Poll every 2 seconds
+      }, 1000); // Poll every 1 second for faster updates
     } else {
       if (pollingRef.current) {
         clearInterval(pollingRef.current);
@@ -111,12 +111,14 @@ export default function DocumentsPage() {
 
     setIsUploading(true);
     setProcessingStatus('');
-    setProgress({ step: 'upload', message: 'Uploading document...', progress: 10 });
+    setProgress({ step: 'upload', message: 'Uploading document...', progress: 20 });
 
     try {
-      // Step 1: Upload document metadata
+      // Step 1: Upload document (stored in database)
       const formData = new FormData();
       formData.append('file', file);
+
+      setProgress({ step: 'upload', message: 'Saving document to database...', progress: 40 });
 
       const uploadResponse = await fetch('/api/admin/documents/upload', {
         method: 'POST',
@@ -132,17 +134,16 @@ export default function DocumentsPage() {
       const documentId = uploadResult.document.id;
       
       setCurrentDocumentId(documentId);
-      setProgress({ step: 'convert', message: 'Converting document format...', progress: 30 });
-
-      // Step 2: Process document content
-      const processFormData = new FormData();
-      processFormData.append('file', file);
-      processFormData.append('documentId', documentId.toString());
+      // Step 2: Start processing document content (no file needed - it's in database)
+      setProgress({ step: 'convert', message: 'Starting document processing...', progress: 75 });
       
       // Start processing in background
       fetch('/api/admin/documents/process', {
         method: 'POST',
-        body: processFormData
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ documentId: documentId.toString() })
       }).then(async (processResponse) => {
         if (!processResponse.ok) {
           const error = await processResponse.json();
@@ -152,9 +153,10 @@ export default function DocumentsPage() {
           return;
         }
 
-        // Processing started successfully, begin polling
-        setProgress({ step: 'chunk', message: 'Processing document content...', progress: 50 });
+        // Processing started successfully, continue polling
+        setProgress({ step: 'chunk', message: 'Breaking document into chunks...', progress: 80 });
       }).catch((error) => {
+        console.error('Processing error:', error);
         setProgress({ step: 'error', message: error.message, progress: 0 });
         setIsUploading(false);
         setProcessingStatus(`❌ Error: ${error.message}`);

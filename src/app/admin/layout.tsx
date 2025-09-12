@@ -90,6 +90,24 @@ export default function AdminLayout({
                   </>
                 )}
                 
+                {/* Client/Demo navigation items */}
+                {!isAdmin && (
+                  <>
+                    <Link 
+                      href="/admin/documents" 
+                      className="text-gray-600 hover:text-aravo-red font-medium transition-colors"
+                    >
+                      Upload Documents
+                    </Link>
+                    <Link 
+                      href="/admin/processed-documents" 
+                      className="text-gray-600 hover:text-aravo-red font-medium transition-colors"
+                    >
+                      Processed Documents
+                    </Link>
+                  </>
+                )}
+
                 {/* Available to all authenticated users */}
                 <Link 
                   href="/admin/frameworks" 
@@ -97,12 +115,19 @@ export default function AdminLayout({
                 >
                   Frameworks
                 </Link>
-                <Link 
-                  href="/admin/documents" 
-                  className="text-gray-600 hover:text-aravo-red font-medium transition-colors"
-                >
-                  Documents
-                </Link>
+                
+                {/* Admin navigation items */}
+                {isAdmin && (
+                  <>
+                    <Link 
+                      href="/admin/documents" 
+                      className="text-gray-600 hover:text-aravo-red font-medium transition-colors"
+                    >
+                      Documents
+                    </Link>
+                  </>
+                )}
+                
                 <Link 
                   href="/admin/analyses" 
                   className="text-gray-600 hover:text-aravo-red font-medium transition-colors"

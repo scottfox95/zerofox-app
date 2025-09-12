@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
       };
     } else if (doc.text_chunks_count > 0) {
       // Document is being processed - has text chunks but no semantic chunks yet
-      const estimatedProgress = Math.min(90, 70 + (doc.text_chunks_count * 0.1));
+      const estimatedProgress = Math.round(Math.min(90, 70 + (doc.text_chunks_count * 0.1)));
       progress = {
         step: 'embed',
         message: 'Generating semantic embeddings...',
@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
     } else {
       // Just uploaded, conversion in progress
       const timeSinceUpload = Date.now() - new Date(doc.created_at).getTime();
-      const estimatedProgress = Math.min(70, 30 + (timeSinceUpload / 10000)); // Rough time-based estimate
+      const estimatedProgress = Math.round(Math.min(75, 50 + (timeSinceUpload / 5000))); // Faster progress estimate
       
       progress = {
         step: 'chunk',
