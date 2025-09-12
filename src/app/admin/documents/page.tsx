@@ -57,7 +57,12 @@ export default function DocumentsPage() {
       
       const data = await response.json();
       if (data.progress) {
-        setProgress(data.progress);
+        // Ensure progress percentage is valid (0-100)
+        const sanitizedProgress = {
+          ...data.progress,
+          progress: Math.max(0, Math.min(100, data.progress.progress || 0))
+        };
+        setProgress(sanitizedProgress);
         
         if (data.progress.step === 'complete') {
           setIsPolling(false);

@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
       };
     } else if (doc.text_chunks_count > 0) {
       // Document is being processed - has text chunks but no semantic chunks yet
-      const estimatedProgress = Math.round(Math.min(90, 70 + (doc.text_chunks_count * 0.1)));
+      const estimatedProgress = Math.max(0, Math.min(90, 70 + Math.floor(doc.text_chunks_count * 0.1)));
       progress = {
         step: 'embed',
         message: 'Generating semantic embeddings...',
@@ -62,14 +62,15 @@ export async function GET(request: NextRequest) {
         details: `Processing ${doc.text_chunks_count} text chunks`
       };
     } else {
-      // Just uploaded, conversion in progress
+      // Just uploaded, conversion in progress - use faster time-based estimate
       const timeSinceUpload = Date.now() - new Date(doc.created_at).getTime();
-      const estimatedProgress = Math.round(Math.min(75, 50 + (timeSinceUpload / 5000))); // Faster progress estimate
+      const timeBasedProgress = Math.max(0, Math.min(25, timeSinceUpload / 2000)); // Faster progression
+      const estimatedProgress = Math.max(50, Math.min(80, 50 + timeBasedProgress));
       
       progress = {
         step: 'chunk',
         message: 'Breaking document into chunks...',
-        progress: estimatedProgress,
+        progress: Math.round(estimatedProgress),
         details: `Converting ${doc.filename}`
       };
     }
