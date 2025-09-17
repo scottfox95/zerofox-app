@@ -85,6 +85,10 @@ export default function AnalysisResultsPage() {
   const [activeTab, setActiveTab] = useState<'overview' | 'evidence'>('overview');
   const [selectedMapping, setSelectedMapping] = useState<EvidenceMapping | null>(null);
   
+  // Export dropdown state
+  const [markdownDropdownOpen, setMarkdownDropdownOpen] = useState(false);
+  const [pdfDropdownOpen, setPdfDropdownOpen] = useState(false);
+  
   // Document viewer state
   const [viewerOpen, setViewerOpen] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<{
@@ -130,11 +134,76 @@ export default function AnalysisResultsPage() {
     }
   };
 
+  // Export handlers
+  const handleExportMarkdown = async (statusFilter?: string) => {
+    try {
+      const url = `/api/admin/analyses/${analysisId}/export/markdown${statusFilter ? `?status=${statusFilter}` : ''}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('Failed to export markdown');
+      }
+      
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = downloadUrl;
+      a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') || `analysis_${analysisId}.md`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Export markdown error:', error);
+      alert('Failed to export markdown report');
+    }
+  };
+
+  const handleExportPDF = async (statusFilter?: string) => {
+    try {
+      const url = `/api/admin/analyses/${analysisId}/export/pdf${statusFilter ? `?status=${statusFilter}` : ''}`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('Failed to export PDF');
+      }
+      
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = downloadUrl;
+      a.download = response.headers.get('Content-Disposition')?.split('filename=')[1]?.replace(/"/g, '') || `analysis_${analysisId}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Export PDF error:', error);
+      alert('Failed to export PDF report');
+    }
+  };
+
   useEffect(() => {
     if (analysisId) {
       fetchResults();
     }
   }, [analysisId]);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Element;
+      if (!target.closest('.relative')) {
+        setMarkdownDropdownOpen(false);
+        setPdfDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   const fetchResults = async () => {
     try {
@@ -325,13 +394,152 @@ export default function AnalysisResultsPage() {
     <div className="p-8">
       {/* Header */}
       <div className="mb-6">
-        <div className="flex items-center space-x-2 text-sm text-gray-600 mb-2">
-          <Link href="/admin/analyses" className="hover:text-blue-600">Analyses</Link>
-          <span>›</span>
-          <span>{analysis.frameworkName}</span>
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            <div className="flex items-center space-x-2 text-sm text-gray-600 mb-2">
+              <Link href="/admin/analyses" className="hover:text-blue-600">Analyses</Link>
+              <span>›</span>
+              <span>{analysis.frameworkName}</span>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">{analysis.frameworkName}</h1>
+            <p className="text-gray-600">Analysis completed on {new Date(analysis.completedAt || analysis.createdAt).toLocaleString()}</p>
+          </div>
+          
+          {/* Export Buttons */}
+          <div className="flex items-center space-x-3">
+            {/* Markdown Export Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setMarkdownDropdownOpen(!markdownDropdownOpen)}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                📄 Export Markdown
+                <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              
+              {markdownDropdownOpen && (
+                <div className="absolute right-0 z-50 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200">
+                  <div className="py-2">
+                    <button
+                      onClick={() => {
+                        handleExportMarkdown();
+                        setMarkdownDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      📄 All Controls ({results?.analysis.totalControls || 0})
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleExportMarkdown('compliant');
+                        setMarkdownDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      ✅ Compliant Only ({results?.analysis.compliantControls || 0})
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleExportMarkdown('partial');
+                        setMarkdownDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      ⚠️ Partial Only ({results?.analysis.partialControls || 0})
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleExportMarkdown('missing');
+                        setMarkdownDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      ❌ Missing Only ({results?.analysis.missingControls || 0})
+                    </button>
+                    <hr className="my-2" />
+                    <button
+                      onClick={() => {
+                        handleExportMarkdown('compliant,partial');
+                        setMarkdownDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      ✅⚠️ Compliant & Partial ({(results?.analysis.compliantControls || 0) + (results?.analysis.partialControls || 0)})
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* PDF Export Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setPdfDropdownOpen(!pdfDropdownOpen)}
+                className="inline-flex items-center px-4 py-2 bg-red-600 text-white font-medium rounded-lg hover:bg-red-700 transition-colors"
+              >
+                📋 Export PDF
+                <svg className="ml-2 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              
+              {pdfDropdownOpen && (
+                <div className="absolute right-0 z-50 mt-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200">
+                  <div className="py-2">
+                    <button
+                      onClick={() => {
+                        handleExportPDF();
+                        setPdfDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      📋 All Controls ({results?.analysis.totalControls || 0})
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleExportPDF('compliant');
+                        setPdfDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      ✅ Compliant Only ({results?.analysis.compliantControls || 0})
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleExportPDF('partial');
+                        setPdfDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      ⚠️ Partial Only ({results?.analysis.partialControls || 0})
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleExportPDF('missing');
+                        setPdfDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      ❌ Missing Only ({results?.analysis.missingControls || 0})
+                    </button>
+                    <hr className="my-2" />
+                    <button
+                      onClick={() => {
+                        handleExportPDF('compliant,partial');
+                        setPdfDropdownOpen(false);
+                      }}
+                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      ✅⚠️ Compliant & Partial ({(results?.analysis.compliantControls || 0) + (results?.analysis.partialControls || 0)})
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-        <h1 className="text-2xl font-bold text-gray-900">{analysis.frameworkName}</h1>
-        <p className="text-gray-600">Analysis completed on {new Date(analysis.completedAt || analysis.createdAt).toLocaleString()}</p>
       </div>
 
       {/* Tab Navigation */}

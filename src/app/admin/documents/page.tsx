@@ -19,6 +19,7 @@ export default function DocumentsPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [progress, setProgress] = useState<ProcessingProgress | null>(null);
+  const [completedUploads, setCompletedUploads] = useState<Array<{id: number, name: string}>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // TODO: Add localStorage persistence later
@@ -48,19 +49,34 @@ export default function DocumentsPage() {
 
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    // Process files one by one
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      await processFile(file, i + 1, files.length);
+    }
+
+    // Clear file input after all uploads complete
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const processFile = async (file: File, currentFile: number, totalFiles: number) => {
 
     setIsUploading(true);
     setProcessingStatus('');
-    setProgress({ step: 'upload', message: 'Uploading document...', progress: 20 });
+    const filePrefix = totalFiles > 1 ? `File ${currentFile}/${totalFiles}: ` : '';
+    setProgress({ step: 'upload', message: `${filePrefix}Uploading ${file.name}...`, progress: 20 });
 
     try {
       // Step 1: Upload document (stored in database)
       const formData = new FormData();
       formData.append('file', file);
 
-      setProgress({ step: 'upload', message: 'Saving document to database...', progress: 40 });
+      setProgress({ step: 'upload', message: `${filePrefix}Saving ${file.name} to database...`, progress: 40 });
 
       const uploadResponse = await fetch('/api/admin/documents/upload', {
         method: 'POST',
@@ -75,7 +91,7 @@ export default function DocumentsPage() {
       const uploadResult = await uploadResponse.json();
       const documentId = uploadResult.document.id;
       // Step 2: Start processing document content
-      setProgress({ step: 'convert', message: 'Processing document in background...', progress: 90 });
+      setProgress({ step: 'convert', message: `${filePrefix}Processing ${file.name}...`, progress: 90 });
       
       // Start processing in background
       fetch('/api/admin/documents/process', {
@@ -93,14 +109,30 @@ export default function DocumentsPage() {
           return;
         }
 
-        // Processing started successfully - show completion
-        setProgress({ step: 'complete', message: 'Upload complete! Document is processing...', progress: 100 });
-        setIsUploading(false);
-        setProcessingStatus(`✅ Document uploaded successfully! Processing will continue in the background. Check "Processed Documents" to view results when ready.`);
+        // Processing completed successfully
+        const result = await processResponse.json();
+        setProgress({ step: 'complete', message: `${filePrefix}${file.name} processed successfully!`, progress: 100 });
         
-        // Clear file input
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
+        // Add to completed uploads
+        setCompletedUploads(prev => [...prev, { id: documentId, name: file.name }]);
+        
+        // If this is the last file, show final status after a brief delay
+        if (currentFile === totalFiles) {
+          setTimeout(() => {
+            setIsUploading(false);
+            setProgress(null);
+            if (totalFiles === 1) {
+              setProcessingStatus(`✅ ${file.name} uploaded and processed successfully!`);
+            } else {
+              setProcessingStatus(`✅ All ${totalFiles} documents uploaded and processed successfully!`);
+            }
+            
+            // Clear status after 5 seconds to allow new uploads
+            setTimeout(() => {
+              setProcessingStatus('');
+              setCompletedUploads([]);
+            }, 5000);
+          }, 500);
         }
       }).catch((error) => {
         console.error('Processing error:', error);
@@ -134,7 +166,7 @@ export default function DocumentsPage() {
             <div className="text-gray-600">
               <p className="text-lg">📄 Upload compliance documents for processing</p>
               <p className="text-sm mt-2">Supported formats: PDF, DOCX, XLSX, HTML, TXT, MD, JSON</p>
-              <p className="text-xs text-gray-500">Maximum file size: 10MB</p>
+              <p className="text-xs text-gray-500">Maximum file size: 10MB each • Multiple files supported</p>
             </div>
             
             <div>
@@ -144,6 +176,7 @@ export default function DocumentsPage() {
                 onChange={handleFileUpload}
                 accept=".txt,.md,.json,.pdf,.docx,.xlsx,.html,.htm"
                 disabled={isUploading}
+                multiple
                 className="hidden"
                 id="file-upload"
               />
@@ -157,7 +190,7 @@ export default function DocumentsPage() {
               >
                 {isUploading ? (
                 progress ? `⏳ ${progress.message}` : '⏳ Processing...'
-              ) : '📁 Choose File'}
+              ) : '📁 Choose Files'}
               </label>
             </div>
 
@@ -223,6 +256,23 @@ export default function DocumentsPage() {
               </div>
             )}
             
+            {/* Completed Uploads During Processing */}
+            {completedUploads.length > 0 && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                <div className="text-sm font-medium text-green-800 mb-2">
+                  ✅ Completed uploads:
+                </div>
+                <ul className="text-xs text-green-700 space-y-1">
+                  {completedUploads.map((upload, index) => (
+                    <li key={upload.id} className="flex items-center space-x-2">
+                      <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
+                      <span>{upload.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {/* Final Status Message */}
             {processingStatus && !progress && (
               <div className={`p-3 rounded-lg text-sm ${
@@ -268,7 +318,7 @@ export default function DocumentsPage() {
               </div>
             </div>
             <div className="mt-3 text-xs text-blue-600">
-              ℹ️ Processing can take 1-2 minutes for large documents. You can safely navigate to other pages - processing will continue in the background.
+              ℹ️ Processing typically completes in a few seconds. Status will update automatically when finished.
             </div>
           </div>
         )}

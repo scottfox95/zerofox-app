@@ -29,6 +29,7 @@
     "pdf-parse-fork": "^1.2.0",
     "pdf-poppler": "^0.2.1",
     "pdfjs-dist": "^5.4.54",
+    "puppeteer": "^24.21.0",
     "react": "^18",
     "react-dom": "^18",
     "react-pdf": "^10.1.0",

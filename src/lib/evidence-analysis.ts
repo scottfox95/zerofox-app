@@ -6,6 +6,40 @@ import PerformanceMonitor from './performance-monitor';
 
 import { updateAnalysisProgress, addInterimResult } from './progress-tracker';
 
+// Helper function to retry database operations with exponential backoff
+async function retryDbOperation<T>(
+  operation: () => Promise<T>, 
+  maxRetries: number = 3, 
+  initialDelay: number = 1000
+): Promise<T> {
+  let lastError: Error;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+      
+      // Check if it's a connection error
+      const isConnectionError = error instanceof Error && (
+        error.message.includes('getaddrinfo ENOTFOUND') ||
+        error.message.includes('Connection error') ||
+        error.message.includes('fetch failed')
+      );
+      
+      if (!isConnectionError || attempt === maxRetries) {
+        throw error;
+      }
+      
+      const delay = initialDelay * Math.pow(2, attempt - 1);
+      console.warn(`Database operation failed (attempt ${attempt}/${maxRetries}), retrying in ${delay}ms:`, error.message);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError!;
+}
+
 export interface EvidenceMapping {
   id?: number;
   analysisId: number;
@@ -195,6 +229,7 @@ export class EvidenceAnalyzer {
       `;
 
       const analysis = analysisResult[0] as Analysis;
+      console.log(`📋 [Analysis ${analysis.id}] Analysis record created, starting performAnalysis...`);
 
       // Start async analysis process
       this.performAnalysis(analysis.id!, organizationId, controlsResult, documentIds, framework, options)
@@ -207,12 +242,22 @@ export class EvidenceAnalyzer {
             error: errorMessage,
             stack: error instanceof Error ? error.stack : undefined
           });
-          // Update analysis status to failed
-          sql`
+          // Try to update analysis status to failed with retry logic
+          retryDbOperation(() => sql`
             UPDATE analyses 
             SET status = 'failed', completed_at = CURRENT_TIMESTAMP 
             WHERE id = ${analysis.id}
-          `.catch(console.error);
+          `).catch(dbError => {
+            console.error('Failed to update analysis status even with retries:', dbError);
+            // Send progress update as fallback to notify UI
+            updateAnalysisProgress(analysis.id!.toString(), {
+              stage: 'completed',
+              progress: 100,
+              currentStep: `Analysis failed: ${errorMessage}`,
+              completedSteps: 0,
+              completed: true
+            });
+          });
         });
 
       analysisTimer.addMetadata('analysisId', analysis.id);
@@ -261,6 +306,7 @@ export class EvidenceAnalyzer {
 
     try {
       // Send initial progress
+      console.log(`🚀 [Analysis ${analysisId}] Starting performAnalysis with ${controls.length} controls`);
       updateAnalysisProgress(analysisId.toString(), {
         stage: 'initializing',
         progress: 0,
@@ -270,6 +316,7 @@ export class EvidenceAnalyzer {
         currentControl: null,
         interimResults: []
       });
+      console.log(`📡 [Analysis ${analysisId}] Initial progress update sent`);
       // Step 1: Determine which documents to use
       let targetDocumentIds = documentIds;
       
@@ -517,8 +564,8 @@ export class EvidenceAnalyzer {
         }
       });
 
-      // Update analysis with results
-      await sql`
+      // Update analysis with results (with retry logic)
+      await retryDbOperation(() => sql`
         UPDATE analyses SET
           status = 'completed',
           completed_at = CURRENT_TIMESTAMP,
@@ -528,7 +575,7 @@ export class EvidenceAnalyzer {
           average_confidence = ${averageConfidence},
           processing_time = ${processingTime}
         WHERE id = ${analysisId}
-      `;
+      `);
 
       // Final progress update: Analysis completed
       updateAnalysisProgress(analysisId.toString(), {
@@ -568,12 +615,26 @@ export class EvidenceAnalyzer {
 
     } catch (error) {
       console.error('Analysis processing failed:', error);
-      await sql`
-        UPDATE analyses SET
-          status = 'failed',
-          completed_at = CURRENT_TIMESTAMP
-        WHERE id = ${analysisId}
-      `;
+      
+      // Try to update analysis status to failed, with retry logic
+      try {
+        await retryDbOperation(() => sql`
+          UPDATE analyses SET
+            status = 'failed',
+            completed_at = CURRENT_TIMESTAMP
+          WHERE id = ${analysisId}
+        `);
+      } catch (dbError) {
+        console.error('Failed to update analysis status to failed even with retries:', dbError);
+        // Send progress update as fallback to notify UI
+        updateAnalysisProgress(analysisId.toString(), {
+          stage: 'completed',
+          progress: 100,
+          currentStep: `Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          completedSteps: 0,
+          completed: true
+        });
+      }
       
       await performAnalysisTimer.end(false, error instanceof Error ? error.message : 'Analysis processing failed');
       throw error;
