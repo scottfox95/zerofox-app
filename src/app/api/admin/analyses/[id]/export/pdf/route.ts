@@ -37,7 +37,7 @@ export async function GET(
     const analysis = analysisResult[0];
 
     // Get evidence mappings with optional status filtering
-    let evidenceMappings;
+    let evidenceMappings: any[] = [];
     
     if (statusFilter) {
       const allowedStatuses = statusFilter.split(',').map(s => s.trim()).filter(s => 
@@ -146,7 +146,7 @@ export async function GET(
     }
     filename += `_${new Date().toISOString().split('T')[0]}.pdf`;
 
-    return new NextResponse(pdfBuffer, {
+    return new NextResponse(Buffer.from(pdfBuffer), {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="${filename}"`,

@@ -36,7 +36,7 @@ export async function GET(
     const analysis = analysisResult[0];
 
     // Get evidence mappings with optional status filtering
-    let evidenceMappings;
+    let evidenceMappings: any[] = [];
     
     if (statusFilter) {
       const allowedStatuses = statusFilter.split(',').map(s => s.trim()).filter(s => 
