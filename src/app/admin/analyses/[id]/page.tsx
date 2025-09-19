@@ -163,8 +163,22 @@ export default function AnalysisResultsPage() {
     try {
       const url = `/api/admin/analyses/${analysisId}/export/pdf${statusFilter ? `?status=${statusFilter}` : ''}`;
       const response = await fetch(url);
+      
       if (!response.ok) {
-        throw new Error('Failed to export PDF');
+        // Try to get error details from response
+        let errorMessage = 'Failed to export PDF';
+        try {
+          const errorData = await response.json();
+          if (errorData.error) {
+            errorMessage = errorData.error;
+            if (errorData.suggestion) {
+              errorMessage += `\n\n${errorData.suggestion}`;
+            }
+          }
+        } catch {
+          // If we can't parse error JSON, use generic message
+        }
+        throw new Error(errorMessage);
       }
       
       const blob = await response.blob();
@@ -179,7 +193,8 @@ export default function AnalysisResultsPage() {
       document.body.removeChild(a);
     } catch (error) {
       console.error('Export PDF error:', error);
-      alert('Failed to export PDF report');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to download PDF report';
+      alert(errorMessage);
     }
   };
 

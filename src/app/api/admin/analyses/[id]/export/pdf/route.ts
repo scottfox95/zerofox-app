@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 import puppeteer from 'puppeteer';
+import chromium from '@sparticuz/chromium';
 
 const sql = neon(process.env.NEON_DATABASE_URL!);
 
@@ -109,34 +110,95 @@ export async function GET(
       statusFilter
     );
 
-    // Generate PDF using Puppeteer
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
+    // Generate PDF using Puppeteer with serverless-friendly configuration
+    let browser;
+    let pdfBuffer;
     
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    
-    const pdfBuffer = await page.pdf({
-      format: 'A4',
-      margin: {
-        top: '20mm',
-        right: '20mm',
-        bottom: '20mm',
-        left: '20mm'
-      },
-      displayHeaderFooter: true,
-      headerTemplate: `<div style="font-size: 10px; width: 100%; text-align: center; margin: 0 20mm;">
-        <span>${analysis.framework_name} Compliance Report${statusFilter ? ` (${statusFilter.split(',').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(', ')})` : ''}</span>
-      </div>`,
-      footerTemplate: `<div style="font-size: 10px; width: 100%; text-align: center; margin: 0 20mm;">
-        <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span> | Generated on ${new Date().toLocaleDateString()}</span>
-      </div>`,
-      printBackground: true
-    });
-
-    await browser.close();
+    try {
+      // Determine if we're in a serverless environment (like Vercel)
+      const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.FUNCTION_NAME;
+      
+      let executablePath: string | undefined;
+      let chromeArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--disable-gpu',
+        '--disable-web-security',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding'
+      ];
+      
+      if (isServerless) {
+        // Use Chromium for serverless environments
+        executablePath = await chromium.executablePath();
+        chromeArgs = [...chromeArgs, ...chromium.args];
+      } else {
+        // Use system Chrome for local/development
+        executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+        chromeArgs = [...chromeArgs, '--no-zygote', '--single-process'];
+      }
+      
+      browser = await puppeteer.launch({
+        headless: true,
+        timeout: 30000, // 30 second timeout for launch
+        args: chromeArgs,
+        executablePath,
+        // Reduce memory usage
+        defaultViewport: { width: 1280, height: 720 }
+      });
+      
+      const page = await browser.newPage();
+      
+      // Set longer timeout for content loading
+      await page.setContent(html, { 
+        waitUntil: 'networkidle0',
+        timeout: 30000 
+      });
+      
+      pdfBuffer = await page.pdf({
+        format: 'A4',
+        timeout: 30000, // 30 second timeout for PDF generation
+        margin: {
+          top: '20mm',
+          right: '20mm',
+          bottom: '20mm',
+          left: '20mm'
+        },
+        displayHeaderFooter: true,
+        headerTemplate: `<div style="font-size: 10px; width: 100%; text-align: center; margin: 0 20mm;">
+          <span>${analysis.framework_name} Compliance Report${statusFilter ? ` (${statusFilter.split(',').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(', ')})` : ''}</span>
+        </div>`,
+        footerTemplate: `<div style="font-size: 10px; width: 100%; text-align: center; margin: 0 20mm;">
+          <span>Page <span class="pageNumber"></span> of <span class="totalPages"></span> | Generated on ${new Date().toLocaleDateString()}</span>
+        </div>`,
+        printBackground: true
+      });
+      
+    } catch (puppeteerError) {
+      console.error('Puppeteer error:', puppeteerError);
+      
+      // If Puppeteer fails, return an error with helpful information
+      return NextResponse.json(
+        { 
+          error: 'PDF generation failed. This may be due to server environment limitations.',
+          details: 'Puppeteer could not launch Chrome browser in the deployment environment',
+          suggestion: 'Try exporting as Markdown instead, or contact support if this issue persists'
+        },
+        { status: 500 }
+      );
+    } finally {
+      if (browser) {
+        try {
+          await browser.close();
+        } catch (closeError) {
+          console.error('Error closing browser:', closeError);
+        }
+      }
+    }
 
     // Generate filename with status filter suffix
     let filename = `${analysis.framework_name}_analysis_${analysisId}`;

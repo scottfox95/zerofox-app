@@ -1,0 +1,11 @@
+{
+  "functions": {
+    "src/app/api/admin/analyses/[id]/export/pdf/route.ts": {
+      "maxDuration": 60
+    }
+  },
+  "env": {
+    "PUPPETEER_SKIP_CHROMIUM_DOWNLOAD": "true",
+    "PUPPETEER_EXECUTABLE_PATH": "/usr/bin/google-chrome-stable"
+  }
+}
