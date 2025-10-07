@@ -580,6 +580,9 @@ export default function AnalysesPage() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  ID
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Framework
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -587,9 +590,6 @@ export default function AnalysesPage() {
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Controls
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Confidence
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Duration
@@ -617,6 +617,11 @@ export default function AnalysesPage() {
                     onClick={() => window.location.href = `/admin/analyses/${analysis.id}`}
                   >
                     <td className="px-6 py-4">
+                      <div className="text-sm font-mono font-medium text-gray-900">
+                        #{analysis.id}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
                       <div className="text-sm font-medium text-gray-900">
                         {analysis.frameworkName}
                       </div>
@@ -637,9 +642,6 @@ export default function AnalysesPage() {
                           </div>
                         )}
                       </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">
-                      {analysis.status === 'completed' ? `${Math.round(analysis.averageConfidence)}%` : 'N/A'}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-900">
                       {formatDuration(analysis.processingTime)}
