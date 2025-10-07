@@ -105,7 +105,7 @@ export async function POST(request: NextRequest) {
 
     consoleLogger.apiCall('POST', '/api/admin/analyses');
     const body = await request.json();
-    const { frameworkId, documentIds, testMode, selectedModel, customControlCount } = body;
+    const { frameworkId, documentIds, selectedModel, selectedControlIds } = body;
     
     if (!frameworkId) {
       const duration = Date.now() - startTime;
@@ -133,9 +133,8 @@ export async function POST(request: NextRequest) {
     consoleLogger.info('Starting analysis request', 'API', { 
       frameworkId, 
       documentIds: documentIds?.length || 'all',
-      testMode,
       selectedModel,
-      customControlCount
+      selectedControlIds: selectedControlIds?.length || 'all'
     });
     
     const result = await analyzer.startAnalysis(
@@ -143,9 +142,8 @@ export async function POST(request: NextRequest) {
       frameworkId, 
       documentIds,
       {
-        testMode: testMode,
         selectedModel: selectedModel,
-        customControlCount: customControlCount
+        selectedControlIds: selectedControlIds
       }
     );
     

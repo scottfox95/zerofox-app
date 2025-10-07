@@ -140,24 +140,50 @@ export class DocumentIntelligenceService {
   ): Promise<{ success: boolean; organizedDocument?: OrganizedDocument; error?: string }> {
     try {
       // Get all semantic chunks for the documents
-      let chunks = await sql`
-        SELECT sc.*, d.original_name, d.file_type
-        FROM semantic_chunks sc
-        JOIN documents d ON sc.document_id = d.id
-        WHERE d.organization_id = ${organizationId}
-        AND d.id = ANY(${documentIds})
-        ORDER BY sc.category, sc.topic, sc.relevance_score DESC
-      `;
+      console.log(`🔍 Fetching semantic chunks for ${documentIds.length} documents:`, documentIds);
+      
+      let chunks: any[];
+      if (documentIds.length === 0) {
+        chunks = [];
+      } else if (documentIds.length === 1) {
+        // Single document - use simple equality
+        chunks = await sql`
+          SELECT sc.*, d.original_name, d.file_type
+          FROM semantic_chunks sc
+          JOIN documents d ON sc.document_id = d.id
+          WHERE d.organization_id = ${organizationId}
+          AND d.id = ${documentIds[0]}
+          ORDER BY sc.category, sc.topic, sc.relevance_score DESC
+        `;
+      } else {
+        // Multiple documents - fetch individually and combine
+        const chunkArrays = await Promise.all(
+          documentIds.map(docId => sql`
+            SELECT sc.*, d.original_name, d.file_type
+            FROM semantic_chunks sc
+            JOIN documents d ON sc.document_id = d.id
+            WHERE d.organization_id = ${organizationId}
+            AND d.id = ${docId}
+            ORDER BY sc.category, sc.topic, sc.relevance_score DESC
+          `)
+        );
+        chunks = chunkArrays.flat();
+      }
+      console.log(`🔍 Found ${chunks.length} semantic chunks`);
 
       if (chunks.length === 0) {
         console.log('⚠️ No semantic chunks found, attempting to create them for selected documents...');
         
         // Get document names for better error message
-        const docInfo = await sql`
-          SELECT id, original_name 
-          FROM documents 
-          WHERE id = ANY(${documentIds})
-        `;
+        let docInfo;
+        if (documentIds.length === 1) {
+          docInfo = await sql`SELECT id, original_name FROM documents WHERE id = ${documentIds[0]}`;
+        } else {
+          const docInfoArrays = await Promise.all(
+            documentIds.map(docId => sql`SELECT id, original_name FROM documents WHERE id = ${docId}`)
+          );
+          docInfo = docInfoArrays.flat();
+        }
         const docNames = docInfo.map(d => `${d.original_name} (ID: ${d.id})`).join(', ');
         
         return { 

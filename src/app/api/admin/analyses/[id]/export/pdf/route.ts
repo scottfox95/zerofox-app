@@ -46,20 +46,22 @@ export async function GET(
       );
       
       if (allowedStatuses.length > 0) {
-        evidenceMappings = await sql`
-          SELECT 
-            em.*,
-            c.id as control_id,
-            c.control_id as control_id_string,
-            c.title as control_title,
-            c.description as control_description,
-            c.category as control_category
-          FROM evidence_mappings em
-          JOIN controls c ON em.control_id = c.id::text
-          WHERE em.analysis_id = ${analysisId}
-          AND em.status = ANY(${allowedStatuses})
-          ORDER BY c.control_id, em.confidence_score DESC
-        `;
+        const result = await sql.query(
+          `SELECT 
+             em.*,
+             c.id as control_id,
+             c.control_id as control_id_string,
+             c.title as control_title,
+             c.description as control_description,
+             c.category as control_category
+           FROM evidence_mappings em
+           JOIN controls c ON em.control_id = c.id::text
+           WHERE em.analysis_id = $1
+           AND em.status = ANY($2)
+           ORDER BY c.control_id, em.confidence_score DESC`,
+          [analysisId, allowedStatuses]
+        );
+        evidenceMappings = Array.isArray(result) ? result : [];
       } else {
         // Invalid status filter, return empty
         evidenceMappings = [];
@@ -83,15 +85,17 @@ export async function GET(
 
     // Get evidence items for each mapping
     const mappingIds = evidenceMappings.map((em: any) => em.id);
-    const evidenceItems = mappingIds.length > 0 ? await sql`
-      SELECT 
-        ei.*,
-        d.original_name as document_name
-      FROM evidence_items ei
-      JOIN documents d ON ei.document_id = d.id
-      WHERE ei.evidence_mapping_id = ANY(${mappingIds})
-      ORDER BY ei.evidence_mapping_id, ei.confidence DESC
-    ` : [];
+    const evidenceItemsResult = mappingIds.length > 0 ? await sql.query(
+      `SELECT 
+         ei.*,
+         d.original_name as document_name
+       FROM evidence_items ei
+       JOIN documents d ON ei.document_id = d.id
+       WHERE ei.evidence_mapping_id = ANY($1)
+       ORDER BY ei.evidence_mapping_id, ei.confidence DESC`,
+      [mappingIds]
+    ) : null;
+    const evidenceItems = evidenceItemsResult && Array.isArray(evidenceItemsResult) ? evidenceItemsResult : [];
 
     // Group evidence items by mapping
     const evidenceByMapping = evidenceItems.reduce((acc: any, item: any) => {

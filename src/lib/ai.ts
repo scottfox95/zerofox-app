@@ -12,6 +12,8 @@ export interface AIModelConfig {
   model_id: string;
   description: string;
   isActive: boolean;
+  reasoning?: 'minimal' | 'low' | 'medium' | 'high';
+  verbosity?: 'low' | 'medium' | 'high';
 }
 
 // Default AI Models
@@ -33,12 +35,14 @@ export const defaultAIModels: AIModelConfig[] = [
     isActive: true
   },
   {
-    id: 'gpt-4o-mini',
-    name: 'GPT-4o Mini',
+    id: 'gpt-5-mini',
+    name: 'GPT-5 Mini',
     provider: 'openai',
-    model_id: 'gpt-4o-mini',
-    description: 'Fast and cost-effective model - perfect for testing (~20x cheaper than premium)',
-    isActive: true
+    model_id: 'gpt-5-mini',
+    description: 'Fast and cost-effective reasoning model with prompt tuning - perfect for testing (~20x cheaper than premium)',
+    isActive: true,
+    reasoning: 'minimal',
+    verbosity: 'low'
   },
   {
     id: 'gemini-flash',
@@ -121,15 +125,22 @@ class AIService {
             await timer.end(false, 'OpenAI API key not configured');
             return { success: false, error: 'OpenAI API key not configured' };
           }
-          const openaiResponse = await this.openai.chat.completions.create({
+          const requestBody: any = {
             model: model.model_id,
-            max_tokens: 100,
-            messages: [{ role: 'user', content: prompt }]
-          });
-          response = openaiResponse.choices[0]?.message?.content || 'No response';
+            input: prompt,
+            max_output_tokens: 100
+          };
+          if (model.reasoning) {
+            requestBody.reasoning = { effort: model.reasoning };
+          }
+          if (model.verbosity) {
+            requestBody.text = { verbosity: model.verbosity };
+          }
+          const openaiResponse = await this.openai.responses.create(requestBody);
+          response = openaiResponse.output_text || 'No response';
           usage = {
-            input_tokens: openaiResponse.usage?.prompt_tokens || 0,
-            output_tokens: openaiResponse.usage?.completion_tokens || 0,
+            input_tokens: openaiResponse.usage?.input_tokens || 0,
+            output_tokens: openaiResponse.usage?.output_tokens || 0,
             total_tokens: openaiResponse.usage?.total_tokens || 0
           };
           break;
@@ -205,12 +216,19 @@ class AIService {
           if (!this.openai) {
             return { success: false, error: 'OpenAI API key not configured' };
           }
-          const openaiResponse = await this.openai.chat.completions.create({
+          const requestBody2: any = {
             model: model.model_id,
-            max_tokens: maxTokens,
-            messages: [{ role: 'user', content: prompt }]
-          });
-          response = openaiResponse.choices[0]?.message?.content || 'No response';
+            input: prompt,
+            max_output_tokens: maxTokens
+          };
+          if (model.reasoning) {
+            requestBody2.reasoning = { effort: model.reasoning };
+          }
+          if (model.verbosity) {
+            requestBody2.text = { verbosity: model.verbosity };
+          }
+          const openaiResponse = await this.openai.responses.create(requestBody2);
+          response = openaiResponse.output_text || 'No response';
           break;
 
         case 'google':
@@ -314,15 +332,22 @@ class AIService {
           if (!this.openai) {
             return { success: false, error: 'OpenAI API key not configured' };
           }
-          const openaiResponse = await this.openai.chat.completions.create({
+          const requestBody3: any = {
             model: model.model_id,
-            max_tokens: maxTokens,
-            messages: [{ role: 'user', content: prompt }]
-          });
-          response = openaiResponse.choices[0]?.message?.content || 'No response';
+            input: prompt,
+            max_output_tokens: maxTokens
+          };
+          if (model.reasoning) {
+            requestBody3.reasoning = { effort: model.reasoning };
+          }
+          if (model.verbosity) {
+            requestBody3.text = { verbosity: model.verbosity };
+          }
+          const openaiResponse = await this.openai.responses.create(requestBody3);
+          response = openaiResponse.output_text || 'No response';
           usage = {
-            input_tokens: openaiResponse.usage?.prompt_tokens || 0,
-            output_tokens: openaiResponse.usage?.completion_tokens || 0,
+            input_tokens: openaiResponse.usage?.input_tokens || 0,
+            output_tokens: openaiResponse.usage?.output_tokens || 0,
             total_tokens: openaiResponse.usage?.total_tokens || 0
           };
           break;

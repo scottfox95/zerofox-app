@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import MarkdownViewer from '@/components/MarkdownViewer';
+import { useAnalysisProgress } from '@/hooks/useAnalysisProgress';
 
 interface EvidenceItem {
   id: number;
@@ -78,12 +79,14 @@ interface AnalysisResults {
 
 export default function AnalysisResultsPage() {
   const params = useParams();
-  const analysisId = params.id;
+  const analysisId = params.id as string;
   const [results, setResults] = useState<AnalysisResults | null>(null);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'overview' | 'evidence'>('overview');
   const [selectedMapping, setSelectedMapping] = useState<EvidenceMapping | null>(null);
+  const [isInProgress, setIsInProgress] = useState(false);
+  const { progressData, connected, isComplete } = useAnalysisProgress(analysisId);
   
   // Export dropdown state
   const [markdownDropdownOpen, setMarkdownDropdownOpen] = useState(false);
@@ -226,6 +229,14 @@ export default function AnalysisResultsPage() {
       const analysisData = await analysisResponse.json();
       
       if (analysisData.success) {
+        const status = analysisData.analysis?.status;
+        const inProgress = status === 'pending' || status === 'processing' || status === 'in_progress';
+        setIsInProgress(inProgress);
+        
+        if (inProgress) {
+          setLoading(false);
+          return;
+        }
         // The API returns data directly at the root level, not nested under 'results'
         const results = {
           analysis: analysisData.analysis,
@@ -385,10 +396,129 @@ export default function AnalysisResultsPage() {
     );
   };
 
+  useEffect(() => {
+    if (isComplete && isInProgress) {
+      fetchResults();
+    }
+  }, [isComplete, isInProgress]);
+
+  useEffect(() => {
+    if (!isInProgress) return;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const analysisResponse = await fetch(`/api/admin/analyses/${analysisId}`);
+        const analysisData = await analysisResponse.json();
+        
+        if (analysisData.success) {
+          const status = analysisData.analysis?.status;
+          if (status === 'completed' || status === 'failed') {
+            fetchResults();
+          }
+        }
+      } catch (error) {
+        console.error('Polling error:', error);
+      }
+    }, 3000);
+
+    return () => clearInterval(pollInterval);
+  }, [isInProgress, analysisId]);
+
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-8 flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  if (isInProgress) {
+    const progress = progressData?.progress || 0;
+    const estimatedTimePerControl = 2.5;
+    const currentIndex = progressData?.currentControl?.index || 0;
+    const totalControls = progressData?.currentControl?.total || 0;
+    const remainingControls = totalControls > 0 ? totalControls - currentIndex : 0;
+    const estimatedSeconds = remainingControls > 0 ? Math.ceil(remainingControls * estimatedTimePerControl) : 0;
+    const estimatedMinutes = Math.floor(estimatedSeconds / 60);
+    const remainingSeconds = estimatedSeconds % 60;
+
+    let statusText = 'Processing analysis...';
+    if (progressData?.currentControl && totalControls > 0) {
+      statusText = `Processing control ${currentIndex} of ${totalControls}`;
+    } else if (progressData?.stage === 'initializing') {
+      statusText = 'Initializing analysis...';
+    } else if (progressData?.stage === 'document_preparation') {
+      statusText = 'Preparing documents...';
+    } else if (progressData?.stage === 'analysis_starting') {
+      statusText = 'Starting analysis...';
+    }
+
+    return (
+      <div className="p-8">
+        <div className="mb-6">
+          <div className="flex items-center space-x-2 text-sm text-gray-600 mb-2">
+            <Link href="/admin/analyses" className="hover:text-blue-600">Analyses</Link>
+            <span>›</span>
+            <span>Analysis #{analysisId}</span>
+          </div>
+          <h1 className="text-2xl font-bold text-gray-900">Analysis in Progress</h1>
+          <p className="text-gray-600">Your analysis is being processed by AI</p>
+        </div>
+
+        <div className="max-w-3xl mx-auto space-y-6">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-3">
+                <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
+                <span className="text-sm font-medium text-gray-700">{statusText}</span>
+              </div>
+              {estimatedSeconds > 0 && (
+                <span className="text-sm text-gray-500">
+                  ~{estimatedMinutes > 0 ? `${estimatedMinutes}m ` : ''}{remainingSeconds}s remaining
+                </span>
+              )}
+            </div>
+
+            <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2">
+              <div 
+                className="bg-blue-600 h-2.5 rounded-full transition-all duration-500"
+                style={{ width: `${Math.min(progress, 100)}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="font-medium text-gray-700">{Math.round(progress)}%</span>
+              {!progressData && (
+                <span className="text-xs text-gray-500">Connecting to progress stream...</span>
+              )}
+            </div>
+          </div>
+
+          {progressData?.runningTotals && (
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+              <h3 className="text-sm font-semibold text-gray-900 mb-4">Current Results</h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-green-600">{progressData.runningTotals.compliant}</div>
+                  <div className="text-xs text-gray-600">Compliant</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-yellow-600">{progressData.runningTotals.partial}</div>
+                  <div className="text-xs text-gray-600">Partial</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-bold text-red-600">{progressData.runningTotals.missing}</div>
+                  <div className="text-xs text-gray-600">Missing</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800">
+              <strong>What's happening:</strong> The AI is analyzing each compliance control against your documents, identifying supporting evidence, and assigning confidence scores. Results will appear automatically when complete.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }

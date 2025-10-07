@@ -50,14 +50,16 @@ export async function GET(request: NextRequest) {
 
       const orgIds = userOrgs.map(org => org.organization_id);
       
-      documents = await sql`
-        SELECT d.*, COUNT(tc.id) as chunk_count
-        FROM documents d
-        LEFT JOIN text_chunks tc ON d.id = tc.document_id
-        WHERE d.organization_id = ANY(${orgIds})
-        GROUP BY d.id
-        ORDER BY d.created_at DESC
-      `;
+      const result = await sql.query(
+        `SELECT d.*, COUNT(tc.id) as chunk_count
+         FROM documents d
+         LEFT JOIN text_chunks tc ON d.id = tc.document_id
+         WHERE d.organization_id = ANY($1)
+         GROUP BY d.id
+         ORDER BY d.created_at DESC`,
+        [orgIds]
+      );
+      documents = Array.isArray(result) ? result : [];
     }
     
     console.log(`📄 Retrieved ${documents.length} documents from database`);

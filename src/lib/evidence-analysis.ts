@@ -149,9 +149,8 @@ export class EvidenceAnalyzer {
     frameworkId: number,
     documentIds?: number[],
     options?: {
-      testMode?: 'quick' | 'full';
       selectedModel?: string;
-      customControlCount?: number;
+      selectedControlIds?: string[];
     }
   ): Promise<{ success: boolean; analysisId?: number; error?: string }> {
     const analysisTimer = PerformanceMonitor.startTimer(
@@ -161,7 +160,7 @@ export class EvidenceAnalyzer {
         frameworkId, 
         organizationId, 
         documentCount: documentIds?.length || 0,
-        testMode: options?.testMode,
+        controlCount: options?.selectedControlIds?.length || 'all',
         selectedModel: options?.selectedModel
       }
     );
@@ -184,23 +183,38 @@ export class EvidenceAnalyzer {
       const framework = frameworkResult[0];
 
       // Get controls for this framework
-      let controlsQuery = sql`
-        SELECT * FROM controls WHERE framework_id = ${frameworkId}
-        ORDER BY control_id
-      `;
+      let controlsResult;
       
-      // Apply test mode limiting
-      if (options?.testMode === 'quick') {
-        const limit = options?.customControlCount || 5;
-        controlsQuery = sql`
+      if (options?.selectedControlIds && Array.isArray(options.selectedControlIds) && options.selectedControlIds.length > 0) {
+        // Focused analysis - only analyze specified controls
+        consoleLogger.analysisStep('Focused analysis mode', `Fetching ${options.selectedControlIds.length} selected controls: [${options.selectedControlIds.join(', ')}]`);
+        console.log(`🔍 Focused query - frameworkId: ${frameworkId}, selectedControlIds:`, options.selectedControlIds);
+        
+        // Query using control_id string (e.g., "A.5.1") with ANY()
+        controlsResult = await sql`
+          SELECT * FROM controls 
+          WHERE framework_id = ${frameworkId} 
+          AND control_id = ANY(${options.selectedControlIds})
+          ORDER BY control_id
+        `;
+        
+        console.log(`🔍 Query result length: ${controlsResult.length}`);
+      } else {
+        // Full analysis - analyze all controls
+        consoleLogger.analysisStep('Full analysis mode', `Fetching all controls`);
+        controlsResult = await sql`
           SELECT * FROM controls WHERE framework_id = ${frameworkId}
           ORDER BY control_id
-          LIMIT ${limit}
         `;
-        consoleLogger.analysisStep('Quick test mode', `Limited to ${limit} controls for cost-effective testing`);
       }
       
-      const controlsResult = await controlsQuery;
+      if (!controlsResult || controlsResult.length === 0) {
+        console.error(`❌ No controls found - frameworkId: ${frameworkId}, options:`, options);
+        consoleLogger.error('No controls found', 'ANALYSIS', { frameworkId, controlsLength: controlsResult?.length, options });
+        await analysisTimer.end(false, 'No controls found for framework');
+        return { success: false, error: 'No controls found for this framework' };
+      }
+      
       consoleLogger.analysisStep('Framework loaded', `${framework.name} with ${controlsResult.length} controls`);
 
       // Create analysis record
@@ -281,9 +295,8 @@ export class EvidenceAnalyzer {
     documentIds?: number[],
     framework?: any,
     options?: {
-      testMode?: 'quick' | 'full';
       selectedModel?: string;
-      customControlCount?: number;
+      selectedControlIds?: string[];
     }
   ): Promise<void> {
     const performAnalysisTimer = PerformanceMonitor.startTimer(
@@ -394,24 +407,29 @@ export class EvidenceAnalyzer {
         { organizationId, targetDocumentCount: targetDocumentIds.length }
       );
 
-      const [semanticChunks, originalChunks] = await Promise.all([
-        sql`
+      // Fetch chunks for each document and combine
+      const semanticArrays = await Promise.all(
+        targetDocumentIds.map(docId => sql`
           SELECT sc.*, d.original_name, d.id as document_id
           FROM semantic_chunks sc
           JOIN documents d ON sc.document_id = d.id
           WHERE d.organization_id = ${organizationId}
-          AND d.id = ANY(${targetDocumentIds})
+          AND d.id = ${docId}
           ORDER BY sc.relevance_score DESC, sc.chunk_index
-        `,
-        sql`
+        `)
+      );
+      const originalArrays = await Promise.all(
+        targetDocumentIds.map(docId => sql`
           SELECT tc.*, d.original_name, d.id as document_id
           FROM text_chunks tc
           JOIN documents d ON tc.document_id = d.id
           WHERE d.organization_id = ${organizationId}
-          AND d.id = ANY(${targetDocumentIds})
+          AND d.id = ${docId}
           ORDER BY tc.document_id, tc.chunk_index
-        `
-      ]);
+        `)
+      );
+      const semanticChunks = semanticArrays.flat();
+      const originalChunks = originalArrays.flat();
 
       dataFetchTimer.addMetadata('semanticChunkCount', semanticChunks.length);
       dataFetchTimer.addMetadata('originalChunkCount', originalChunks.length);
@@ -956,6 +974,11 @@ export class EvidenceAnalyzer {
       promptType = 'iso27001_analysis';
       consoleLogger.analysisStep('Using ISO 27001 specialized prompt', `Framework: ${framework.name}`);
     }
+    // Check if this is CIS Controls v8 framework
+    else if (framework && framework.name.toLowerCase().includes('cisv8')) {
+      promptType = 'cisv8_analysis';
+      consoleLogger.analysisStep('Using CIS Controls v8 specialized prompt', `Framework: ${framework.name}`);
+    }
     
     // Try to get prompt from database first
     const dbPrompt = await this.getPrompt(promptType);
@@ -982,6 +1005,17 @@ export class EvidenceAnalyzer {
           'control.op_capabilities': Array.isArray(control.op_capabilities) ? control.op_capabilities.join(', ') : (control.op_capabilities || 'Not specified'),
           'control.category': control.category || 'Not specified',
           'control.dti': control.dti || 'Not specified'
+        });
+      }
+      // Add CIS v8-specific variables if using CIS prompt
+      else if (promptType === 'cisv8_analysis') {
+        Object.assign(baseVariables, {
+          'control.control_id': control.control_id || '',
+          'control.asset_type': control.asset_type || 'Not specified',
+          'control.security_function': control.security_function || 'Not specified',
+          'control.implementation_groups': Array.isArray(control.implementation_groups) 
+            ? control.implementation_groups.join(', ') 
+            : (control.implementation_groups || 'Not specified')
         });
       }
 
